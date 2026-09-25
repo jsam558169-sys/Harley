@@ -1,0 +1,30 @@
+name: harley_pos
+description: Harley's Inventory and Sales System (POS + Inventory Management)
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+
+  # Firebase
+  firebase_core: ^3.6.0
+  cloud_firestore: ^5.4.4
+  firebase_auth: ^5.3.1
+
+  # Utilities
+  intl: ^0.19.0        # date formatting for reports
+  uuid: ^4.4.0          # generating readable custom IDs if needed
+  google_fonts: ^6.2.1  # Alfa Slab One + Nunito for the retro cafe theme
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

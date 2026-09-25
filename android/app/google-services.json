@@ -1,0 +1,68 @@
+{
+  "project_info": {
+    "project_number": "673951693624",
+    "project_id": "harley-7fc6e",
+    "storage_bucket": "harley-7fc6e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:673951693624:android:4f0ac8ff5dd69aebfa9fcd",
+        "android_client_info": {
+          "package_name": "com.example.harleys"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "673951693624-fb7ukbkh734v1jnu23kud3ee2u551gdo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBbN33sIJLj7Fe5IBVHDBH-X1F0HS8i4tU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "673951693624-fb7ukbkh734v1jnu23kud3ee2u551gdo.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:673951693624:android:338a82e55434ee01fa9fcd",
+        "android_client_info": {
+          "package_name": "com.example.harleys_system"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "673951693624-fb7ukbkh734v1jnu23kud3ee2u551gdo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBbN33sIJLj7Fe5IBVHDBH-X1F0HS8i4tU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "673951693624-fb7ukbkh734v1jnu23kud3ee2u551gdo.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
