@@ -1,7 +1,37 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
 import 'admin_dashboard.dart';
 import 'employee_dashboard.dart';
+
+/// Maps Firebase's raw error codes (e.g. "[firebase_auth/invalid-credential]
+/// The supplied auth credential is incorrect...") to plain, user-facing text.
+String _friendlyAuthError(Object error) {
+  if (error is FirebaseAuthException) {
+    switch (error.code) {
+      case 'invalid-credential':
+      case 'wrong-password':
+      case 'user-not-found':
+        return 'Incorrect email or password.';
+      case 'invalid-email':
+        return 'Please enter a valid email address.';
+      case 'missing-password':
+        return 'Please enter your password.';
+      case 'user-disabled':
+        return 'This account has been disabled. Contact your Owner/Admin.';
+      case 'too-many-requests':
+        return 'Too many attempts. Please wait a moment and try again.';
+      case 'network-request-failed':
+        return 'Network error. Check your internet connection and try again.';
+      default:
+        return 'Login failed. Please try again.';
+    }
+  }
+  if (error.toString().contains('No user profile found')) {
+    return 'This account isn\'t fully set up yet. Contact your Owner/Admin.';
+  }
+  return 'Something went wrong. Please try again.';
+}
 
 /// Login screen styled like the front of a motor café: a marquee-sign
 /// banner up top, order-ticket-style form card below.
@@ -38,7 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       );
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = _friendlyAuthError(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }

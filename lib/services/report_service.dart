@@ -80,7 +80,7 @@ class ReportService {
   /// Ingredient usage summary for a period: ingredientId -> total qty used.
   /// This backs the "ingredient usage monitoring" and "estimated
   /// consumption" objectives.
-  Future<Map<String, int>> generateIngredientUsageSummary({
+  Future<Map<String, num>> generateIngredientUsageSummary({
     required DateTime start,
     required DateTime end,
   }) async {
@@ -92,7 +92,7 @@ class ReportService {
     final entries =
         snap.docs.map((d) => IngredientUsageEntry.fromMap(d.id, d.data()));
 
-    final summary = <String, int>{};
+    final summary = <String, num>{};
     for (final entry in entries) {
       summary.update(
         entry.ingredientId,

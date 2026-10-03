@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/inventory_stock.dart';
+import '../models/ingredient.dart';
+import '../models/finished_product.dart';
 import '../services/inventory_service.dart';
 import '../services/ingredient_service.dart';
 import '../services/finished_product_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/info_list_card.dart';
+import '../widgets/pagination_bar.dart';
 
 enum _MovementSortOption { dateNewest, dateOldest, nameAsc, nameDesc, typeInFirst, typeOutFirst }
 
@@ -47,34 +51,11 @@ class _InventoryMovementsScreenState extends State<InventoryMovementsScreen> {
   final _searchController = TextEditingController();
   final _dateFormat = DateFormat('MMM d, y  h:mm a');
 
-  late Future<Map<String, String>> _nameMapFuture;
   String _searchQuery = '';
   _MovementSortOption _sortOption = _MovementSortOption.dateNewest;
   _TypeFilter _typeFilter = _TypeFilter.all;
-
-  @override
-  void initState() {
-    super.initState();
-    _nameMapFuture = _loadNameMap();
-  }
-
-  /// Builds a single itemId -> display name lookup spanning both
-  /// ingredients and finished products, since a movement's itemId can be
-  /// either.
-  Future<Map<String, String>> _loadNameMap() async {
-    final ingredients = await _ingredientService.getAllIngredients();
-    final finishedProducts = await _finishedProductService.getAllFinishedProducts();
-    return {
-      for (final i in ingredients) i.id: i.name,
-      for (final f in finishedProducts) f.id: f.name,
-    };
-  }
-
-  void _refreshNameMap() {
-    setState(() {
-      _nameMapFuture = _loadNameMap();
-    });
-  }
+  int _pageSize = defaultPageSizeOptions.first;
+  int _currentPage = 0;
 
   List<InventoryStockEntry> _filterSort(List<InventoryStockEntry> entries, Map<String, String> nameMap) {
     String nameOf(InventoryStockEntry e) => nameMap[e.itemId] ?? e.itemId;
@@ -123,165 +104,168 @@ class _InventoryMovementsScreenState extends State<InventoryMovementsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Stock Movement Log'),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), tooltip: 'Refresh item names', onPressed: _refreshNameMap),
-        ],
-      ),
-      body: FutureBuilder<Map<String, String>>(
-        future: _nameMapFuture,
-        builder: (context, nameSnap) {
-          if (!nameSnap.hasData) return const Center(child: CircularProgressIndicator());
-          final nameMap = nameSnap.data!;
+      appBar: AppBar(title: const Text('Stock Movement Log')),
+      body: StreamBuilder<List<Ingredient>>(
+        stream: _ingredientService.watchIngredients(),
+        builder: (context, ingredientSnap) {
+          if (!ingredientSnap.hasData) return const Center(child: CircularProgressIndicator());
 
-          return StreamBuilder<List<InventoryStockEntry>>(
-            stream: _inventoryService.watchMovements(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-              final allMovements = snapshot.data!;
+          return StreamBuilder<List<FinishedProduct>>(
+            stream: _finishedProductService.watchAll(),
+            builder: (context, finishedSnap) {
+              if (!finishedSnap.hasData) return const Center(child: CircularProgressIndicator());
 
-              if (allMovements.isEmpty) {
-                return const Center(child: Text('No stock movements yet.'));
-              }
+              // Live name map — rebuilt every time either source changes, so
+              // a newly-added ingredient's name shows up immediately here
+              // instead of needing a manual refresh.
+              final nameMap = {
+                for (final i in ingredientSnap.data!) i.id: i.name,
+                for (final f in finishedSnap.data!) f.id: f.name,
+              };
 
-              final movements = _filterSort(allMovements, nameMap);
+              return StreamBuilder<List<InventoryStockEntry>>(
+                stream: _inventoryService.watchMovements(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                  final allMovements = snapshot.data!;
 
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: (v) => setState(() => _searchQuery = v),
-                            decoration: InputDecoration(
-                              hintText: 'Search by item name or ID...',
-                              prefixIcon: const Icon(Icons.search, color: AppColors.rust),
-                              suffixIcon: _searchQuery.isEmpty
-                                  ? null
-                                  : IconButton(
-                                      icon: const Icon(Icons.clear, size: 20),
-                                      onPressed: () => setState(() {
-                                        _searchController.clear();
-                                        _searchQuery = '';
-                                      }),
-                                    ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        PopupMenuButton<_MovementSortOption>(
-                          icon: const Icon(Icons.swap_vert, color: AppColors.rust),
-                          tooltip: 'Sort movements',
-                          initialValue: _sortOption,
-                          onSelected: (option) => setState(() => _sortOption = option),
-                          itemBuilder: (context) => _MovementSortOption.values
-                              .map((option) => PopupMenuItem(
-                                    value: option,
-                                    child: Row(
-                                      children: [
-                                        Text(option.label),
-                                        if (option == _sortOption) ...[
-                                          const Spacer(),
-                                          const Icon(Icons.check, size: 18, color: AppColors.rust),
-                                        ],
-                                      ],
-                                    ),
-                                  ))
-                              .toList(),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Row(
-                      children: [
-                        _FilterChip(
-                          label: 'All',
-                          selected: _typeFilter == _TypeFilter.all,
-                          onSelected: () => setState(() => _typeFilter = _TypeFilter.all),
-                        ),
-                        const SizedBox(width: 8),
-                        _FilterChip(
-                          label: 'Stock In',
-                          selected: _typeFilter == _TypeFilter.stockIn,
-                          color: AppColors.teal,
-                          onSelected: () => setState(() => _typeFilter = _TypeFilter.stockIn),
-                        ),
-                        const SizedBox(width: 8),
-                        _FilterChip(
-                          label: 'Stock Out',
-                          selected: _typeFilter == _TypeFilter.stockOut,
-                          color: AppColors.rust,
-                          onSelected: () => setState(() => _typeFilter = _TypeFilter.stockOut),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: movements.isEmpty
-                        ? const Center(child: Text('No movements match your filters.'))
-                        : ListView.builder(
-                            padding: const EdgeInsets.only(top: 8, bottom: 16),
-                            itemCount: movements.length,
-                            itemBuilder: (context, i) {
-                              final m = movements[i];
-                              final isIn = m.stockType == StockType.stockIn;
-                              final name = nameMap[m.itemId] ?? m.itemId;
-                              return Card(
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: (isIn ? AppColors.teal : AppColors.rust).withValues(alpha: 0.15),
-                                    child: Icon(
-                                      isIn ? Icons.arrow_downward : Icons.arrow_upward,
-                                      color: isIn ? AppColors.teal : AppColors.rust,
-                                    ),
-                                  ),
-                                  title: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                                      ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: AppColors.cream,
-                                          borderRadius: BorderRadius.circular(999),
-                                          border: Border.all(color: AppColors.cardBorder),
+                  if (allMovements.isEmpty) {
+                    return const Center(child: Text('No stock movements yet.'));
+                  }
+
+                  final movements = _filterSort(allMovements, nameMap);
+
+                  return Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _searchController,
+                                onChanged: (v) => setState(() {
+                                  _searchQuery = v;
+                                  _currentPage = 0;
+                                }),
+                                decoration: InputDecoration(
+                                  hintText: 'Search by item name or ID...',
+                                  prefixIcon: const Icon(Icons.search, color: AppColors.rust),
+                                  suffixIcon: _searchQuery.isEmpty
+                                      ? null
+                                      : IconButton(
+                                          icon: const Icon(Icons.clear, size: 20),
+                                          onPressed: () => setState(() {
+                                            _searchController.clear();
+                                            _searchQuery = '';
+                                          }),
                                         ),
-                                        child: Text(
-                                          m.isIngredient ? 'Ingredient' : 'Finished Product',
-                                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.brown),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  subtitle: Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'ID: ${m.itemId}',
-                                          style: TextStyle(fontSize: 11, color: AppColors.brown.withValues(alpha: 0.55)),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text('${stockTypeToString(m.stockType)} • Qty ${m.stockQty}'),
-                                        Text('${_dateFormat.format(m.stockDate)}${m.note != null ? " • ${m.note}" : ""}'),
-                                      ],
-                                    ),
-                                  ),
-                                  isThreeLine: true,
                                 ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            PopupMenuButton<_MovementSortOption>(
+                              icon: const Icon(Icons.swap_vert, color: AppColors.rust),
+                              tooltip: 'Sort movements',
+                              initialValue: _sortOption,
+                              onSelected: (option) => setState(() {
+                                _sortOption = option;
+                                _currentPage = 0;
+                              }),
+                              itemBuilder: (context) => _MovementSortOption.values
+                                  .map((option) => PopupMenuItem(
+                                        value: option,
+                                        child: Row(
+                                          children: [
+                                            Text(option.label),
+                                            if (option == _sortOption) ...[
+                                              const Spacer(),
+                                              const Icon(Icons.check, size: 18, color: AppColors.rust),
+                                            ],
+                                          ],
+                                        ),
+                                      ))
+                                  .toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                      PaginationBar(
+                        leading: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _FilterChip(
+                              label: 'All',
+                              selected: _typeFilter == _TypeFilter.all,
+                              onSelected: () => setState(() {
+                                _typeFilter = _TypeFilter.all;
+                                _currentPage = 0;
+                              }),
+                            ),
+                            const SizedBox(width: 8),
+                            _FilterChip(
+                              label: 'Stock In',
+                              selected: _typeFilter == _TypeFilter.stockIn,
+                              color: AppColors.teal,
+                              onSelected: () => setState(() {
+                                _typeFilter = _TypeFilter.stockIn;
+                                _currentPage = 0;
+                              }),
+                            ),
+                            const SizedBox(width: 8),
+                            _FilterChip(
+                              label: 'Stock Out',
+                              selected: _typeFilter == _TypeFilter.stockOut,
+                              color: AppColors.rust,
+                              onSelected: () => setState(() {
+                                _typeFilter = _TypeFilter.stockOut;
+                                _currentPage = 0;
+                              }),
+                            ),
+                          ],
+                        ),
+                        pageSize: _pageSize,
+                        currentPage: _currentPage,
+                        totalItems: movements.length,
+                        onPageSizeChanged: (size) => setState(() {
+                          _pageSize = size;
+                          _currentPage = 0;
+                        }),
+                        onPageChanged: (page) => setState(() => _currentPage = page),
+                      ),
+                      Expanded(
+                        child: movements.isEmpty
+                            ? const Center(child: Text('No movements match your filters.'))
+                            : Builder(builder: (context) {
+                                final pageItems = paginate(movements, _currentPage, _pageSize);
+                                return ListView.builder(
+                                  padding: const EdgeInsets.only(top: 8, bottom: 16),
+                                  itemCount: pageItems.length,
+                                  itemBuilder: (context, i) {
+                                    final m = pageItems[i];
+                                    final isIn = m.stockType == StockType.stockIn;
+                                    final name = nameMap[m.itemId] ?? m.itemId;
+                                    return InfoListCard(
+                                      leadingIcon: isIn ? Icons.arrow_downward : Icons.arrow_upward,
+                                      accentColor: isIn ? AppColors.teal : AppColors.rust,
+                                      title: name,
+                                      idText: 'ID: ${m.itemId}',
+                                      badgeText: m.isIngredient ? 'Ingredient' : 'Finished Product',
+                                      pills: [
+                                        StatPill(
+                                          label: '${stockTypeToString(m.stockType)} • Qty ${m.stockQty}',
+                                          color: isIn ? AppColors.teal : AppColors.rust,
+                                        ),
+                                      ],
+                                      footerText: '${_dateFormat.format(m.stockDate)}${m.note != null ? " • ${m.note}" : ""}',
+                                    );
+                                  },
+                                );
+                              }),
+                      ),
+                    ],
+                  );
+                },
               );
             },
           );

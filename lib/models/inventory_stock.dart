@@ -16,7 +16,7 @@ class InventoryStockEntry {
   final String itemId; // references ingredientId or finishedProductId
   final bool isIngredient; // which collection itemId belongs to — needed to resolve its name
   final StockType stockType;
-  final int stockQty;
+  final num stockQty;
   final DateTime stockDate;
   final String? note; // e.g. "auto-deducted from sale #123"
 
@@ -47,7 +47,7 @@ class InventoryStockEntry {
       // an ingredient movement, so that's the safe fallback.
       isIngredient: map['isIngredient'] ?? true,
       stockType: stockTypeFromString(map['stockType'] ?? 'Stock-in'),
-      stockQty: (map['stockQty'] ?? 0) as int,
+      stockQty: (map['stockQty'] ?? 0) as num,
       stockDate: (map['stockDate'] as Timestamp).toDate(),
       note: map['note'],
     );

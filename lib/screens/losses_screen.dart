@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/loss.dart';
+import '../models/ingredient.dart';
+import '../models/finished_product.dart';
 import '../services/loss_service.dart';
 import '../services/ingredient_service.dart';
 import '../services/finished_product_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/info_list_card.dart';
 
 enum _LossSortOption { dateNewest, dateOldest, nameAsc, nameDesc }
 
@@ -56,30 +59,8 @@ class _LossesScreenState extends State<LossesScreen> {
   final _searchController = TextEditingController();
   final _dateFormat = DateFormat('MMM d, y  h:mm a');
 
-  late Future<Map<String, String>> _nameMapFuture;
   String _searchQuery = '';
   _LossSortOption _sortOption = _LossSortOption.dateNewest;
-
-  @override
-  void initState() {
-    super.initState();
-    _nameMapFuture = _loadNameMap();
-  }
-
-  Future<Map<String, String>> _loadNameMap() async {
-    final ingredients = await _ingredientService.getAllIngredients();
-    final finishedProducts = await _finishedProductService.getAllFinishedProducts();
-    return {
-      for (final i in ingredients) i.id: i.name,
-      for (final f in finishedProducts) f.id: f.name,
-    };
-  }
-
-  void _refreshNameMap() {
-    setState(() {
-      _nameMapFuture = _loadNameMap();
-    });
-  }
 
   List<LossEntry> _filterSort(List<LossEntry> entries, Map<String, String> nameMap) {
     String nameOf(LossEntry e) => nameMap[e.itemId] ?? e.itemId;
@@ -110,164 +91,122 @@ class _LossesScreenState extends State<LossesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Losses'),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), tooltip: 'Refresh item names', onPressed: _refreshNameMap),
-        ],
-      ),
-      body: FutureBuilder<Map<String, String>>(
-        future: _nameMapFuture,
-        builder: (context, nameSnap) {
-          if (!nameSnap.hasData) return const Center(child: CircularProgressIndicator());
-          final nameMap = nameSnap.data!;
+      appBar: AppBar(title: const Text('Losses')),
+      body: StreamBuilder<List<Ingredient>>(
+        stream: _ingredientService.watchIngredients(),
+        builder: (context, ingredientSnap) {
+          if (!ingredientSnap.hasData) return const Center(child: CircularProgressIndicator());
 
-          return StreamBuilder<List<LossEntry>>(
-            stream: _lossService.watchLosses(),
-            builder: (context, snapshot) {
-              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-              final allLosses = snapshot.data!;
+          return StreamBuilder<List<FinishedProduct>>(
+            stream: _finishedProductService.watchAll(),
+            builder: (context, finishedSnap) {
+              if (!finishedSnap.hasData) return const Center(child: CircularProgressIndicator());
 
-              if (allLosses.isEmpty) {
-                return const Center(child: Text('No losses recorded.'));
-              }
+              final nameMap = {
+                for (final i in ingredientSnap.data!) i.id: i.name,
+                for (final f in finishedSnap.data!) f.id: f.name,
+              };
 
-              final losses = _filterSort(allLosses, nameMap);
-              final totalQty = losses.fold<int>(0, (sum, e) => sum + e.lossQty);
+              return StreamBuilder<List<LossEntry>>(
+                stream: _lossService.watchLosses(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                  final allLosses = snapshot.data!;
 
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: (v) => setState(() => _searchQuery = v),
-                            decoration: InputDecoration(
-                              hintText: 'Search by item name or ID...',
-                              prefixIcon: const Icon(Icons.search, color: AppColors.rust),
-                              suffixIcon: _searchQuery.isEmpty
-                                  ? null
-                                  : IconButton(
-                                      icon: const Icon(Icons.clear, size: 20),
-                                      onPressed: () => setState(() {
-                                        _searchController.clear();
-                                        _searchQuery = '';
-                                      }),
-                                    ),
+                  if (allLosses.isEmpty) {
+                    return const Center(child: Text('No losses recorded.'));
+                  }
+
+                  final losses = _filterSort(allLosses, nameMap);
+                  final totalQty = losses.fold<num>(0, (sum, e) => sum + e.lossQty);
+
+                  return Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _searchController,
+                                onChanged: (v) => setState(() => _searchQuery = v),
+                                decoration: InputDecoration(
+                                  hintText: 'Search by item name or ID...',
+                                  prefixIcon: const Icon(Icons.search, color: AppColors.rust),
+                                  suffixIcon: _searchQuery.isEmpty
+                                      ? null
+                                      : IconButton(
+                                          icon: const Icon(Icons.clear, size: 20),
+                                          onPressed: () => setState(() {
+                                            _searchController.clear();
+                                            _searchQuery = '';
+                                          }),
+                                        ),
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        PopupMenuButton<_LossSortOption>(
-                          icon: const Icon(Icons.swap_vert, color: AppColors.rust),
-                          tooltip: 'Sort losses',
-                          initialValue: _sortOption,
-                          onSelected: (option) => setState(() => _sortOption = option),
-                          itemBuilder: (context) => _LossSortOption.values
-                              .map((option) => PopupMenuItem(
-                                    value: option,
-                                    child: Row(
-                                      children: [
-                                        Text(option.label),
-                                        if (option == _sortOption) ...[
-                                          const Spacer(),
-                                          const Icon(Icons.check, size: 18, color: AppColors.rust),
-                                        ],
-                                      ],
-                                    ),
-                                  ))
-                              .toList(),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        '${losses.length} loss entr${losses.length == 1 ? "y" : "ies"} • $totalQty total unit${totalQty == 1 ? "" : "s"} lost',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.brown.withValues(alpha: 0.7)),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: losses.isEmpty
-                        ? const Center(child: Text('No losses match your search.'))
-                        : ListView.builder(
-                            padding: const EdgeInsets.only(top: 4, bottom: 16),
-                            itemCount: losses.length,
-                            itemBuilder: (context, i) {
-                              final loss = losses[i];
-                              final name = nameMap[loss.itemId] ?? loss.itemId;
-                              final color = _reasonColor(loss.lossReason);
-                              return Card(
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: color.withValues(alpha: 0.15),
-                                    child: Icon(Icons.remove_shopping_cart, color: color, size: 20),
-                                  ),
-                                  title: Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                                      ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: AppColors.cream,
-                                          borderRadius: BorderRadius.circular(999),
-                                          border: Border.all(color: AppColors.cardBorder),
-                                        ),
-                                        child: Text(
-                                          loss.isIngredient ? 'Ingredient' : 'Finished Product',
-                                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.brown),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  subtitle: Padding(
-                                    padding: const EdgeInsets.only(top: 4),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          'ID: ${loss.itemId}',
-                                          style: TextStyle(fontSize: 11, color: AppColors.brown.withValues(alpha: 0.55)),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Row(
+                            const SizedBox(width: 8),
+                            PopupMenuButton<_LossSortOption>(
+                              icon: const Icon(Icons.swap_vert, color: AppColors.rust),
+                              tooltip: 'Sort losses',
+                              initialValue: _sortOption,
+                              onSelected: (option) => setState(() => _sortOption = option),
+                              itemBuilder: (context) => _LossSortOption.values
+                                  .map((option) => PopupMenuItem(
+                                        value: option,
+                                        child: Row(
                                           children: [
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: color.withValues(alpha: 0.15),
-                                                borderRadius: BorderRadius.circular(999),
-                                              ),
-                                              child: Text(
-                                                lossReasonToString(loss.lossReason),
-                                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Text('Qty: ${loss.lossQty}'),
+                                            Text(option.label),
+                                            if (option == _sortOption) ...[
+                                              const Spacer(),
+                                              const Icon(Icons.check, size: 18, color: AppColors.rust),
+                                            ],
                                           ],
                                         ),
-                                        const SizedBox(height: 2),
-                                        Text(_dateFormat.format(loss.lossDate)),
-                                      ],
-                                    ),
-                                  ),
-                                  isThreeLine: true,
-                                ),
-                              );
-                            },
+                                      ))
+                                  .toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '${losses.length} loss entr${losses.length == 1 ? "y" : "ies"} • $totalQty total unit${totalQty == 1 ? "" : "s"} lost',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.brown.withValues(alpha: 0.7)),
                           ),
-                  ),
-                ],
+                        ),
+                      ),
+                      Expanded(
+                        child: losses.isEmpty
+                            ? const Center(child: Text('No losses match your search.'))
+                            : ListView.builder(
+                                padding: const EdgeInsets.only(top: 4, bottom: 16),
+                                itemCount: losses.length,
+                                itemBuilder: (context, i) {
+                                  final loss = losses[i];
+                                  final name = nameMap[loss.itemId] ?? loss.itemId;
+                                  final color = _reasonColor(loss.lossReason);
+                                  return InfoListCard(
+                                    leadingIcon: Icons.remove_shopping_cart,
+                                    accentColor: color,
+                                    title: name,
+                                    idText: 'ID: ${loss.itemId}',
+                                    badgeText: loss.isIngredient ? 'Ingredient' : 'Finished Product',
+                                    pills: [
+                                      StatPill(label: lossReasonToString(loss.lossReason), color: color),
+                                      StatPill(label: 'Qty: ${loss.lossQty}', color: AppColors.brown, muted: true),
+                                    ],
+                                    footerText: _dateFormat.format(loss.lossDate),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  );
+                },
               );
             },
           );

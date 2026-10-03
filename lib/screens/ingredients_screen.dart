@@ -3,12 +3,16 @@ import 'package:google_fonts/google_fonts.dart';
 import '../models/ingredient.dart';
 import '../models/inventory_stock.dart';
 import '../models/measurement_unit.dart';
+import '../models/product.dart';
 import '../services/ingredient_service.dart';
 import '../services/inventory_service.dart';
 import '../services/loss_service.dart';
+import '../services/product_service.dart';
+import '../services/collections.dart';
 import '../theme/app_colors.dart';
 import '../widgets/confirm_dialog.dart';
 import '../widgets/responsive.dart';
+import '../widgets/info_list_card.dart';
 
 enum _IngredientSortOption { nameAsc, nameDesc, freshQtyAsc, freshQtyDesc }
 
@@ -20,9 +24,9 @@ extension on _IngredientSortOption {
       case _IngredientSortOption.nameDesc:
         return 'Name (Z–A)';
       case _IngredientSortOption.freshQtyAsc:
-        return 'Fresh Stock (Low–High)';
+        return 'Fresh Stock (Low–High, by unit)';
       case _IngredientSortOption.freshQtyDesc:
-        return 'Fresh Stock (High–Low)';
+        return 'Fresh Stock (High–Low, by unit)';
     }
   }
 }
@@ -47,6 +51,7 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
   final _ingredientService = IngredientService();
   final _inventoryService = InventoryService();
   final _lossService = LossService();
+  final _productService = ProductService();
   final _searchController = TextEditingController();
   String _searchQuery = '';
   _IngredientSortOption _sortOption = _IngredientSortOption.nameAsc;
@@ -65,10 +70,18 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
         result.sort((a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
         break;
       case _IngredientSortOption.freshQtyAsc:
-        result.sort((a, b) => a.freshQty.compareTo(b.freshQty));
+        result.sort((a, b) {
+          final unitCompare = a.unit.compareTo(b.unit);
+          if (unitCompare != 0) return unitCompare;
+          return a.freshQty.compareTo(b.freshQty);
+        });
         break;
       case _IngredientSortOption.freshQtyDesc:
-        result.sort((a, b) => b.freshQty.compareTo(a.freshQty));
+        result.sort((a, b) {
+          final unitCompare = a.unit.compareTo(b.unit);
+          if (unitCompare != 0) return unitCompare;
+          return b.freshQty.compareTo(a.freshQty);
+        });
         break;
     }
     return result;
@@ -92,6 +105,12 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
     final qtyController = TextEditingController();
     final customUnitController = TextEditingController();
     MeasurementUnit unit = MeasurementUnit.piece;
+    bool isSaving = false;
+
+    // Captured once, before `unit` starts changing via the dropdown — this
+    // stays the ORIGINAL unit for the rest of the dialog's lifetime, used
+    // to detect a unit change and work out whether it's auto-convertible.
+    MeasurementUnit? originalUnitEnum;
 
     if (existing != null) {
       final match = MeasurementUnit.values.firstWhere(
@@ -99,6 +118,7 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
         orElse: () => MeasurementUnit.custom,
       );
       unit = match;
+      originalUnitEnum = match;
       if (match == MeasurementUnit.custom) {
         customUnitController.text = existing.unit;
       }
@@ -122,7 +142,7 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
                 TextField(
                   controller: qtyController,
                   decoration: const InputDecoration(labelText: 'Initial Fresh Qty'),
-                  keyboardType: TextInputType.number,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 ),
               ],
               const SizedBox(height: 12),
@@ -152,45 +172,169 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(onPressed: isSaving ? null : () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
-              onPressed: () async {
-                final name = nameController.text.trim();
-                if (name.isEmpty) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(content: Text('Name is required.'), behavior: SnackBarBehavior.floating),
-                  );
-                  return;
-                }
-                final unitLabel = unit == MeasurementUnit.custom
-                    ? customUnitController.text.trim()
-                    : unit.shortLabel;
-                if (unitLabel.isEmpty) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(
-                    const SnackBar(content: Text('Enter a custom unit label.'), behavior: SnackBarBehavior.floating),
-                  );
-                  return;
-                }
-                if (isEditing) {
-                  await _ingredientService.updateIngredient(Ingredient(
-                    id: existing.id,
-                    name: name,
-                    freshQty: existing.freshQty,
-                    expiredQty: existing.expiredQty,
-                    unit: unitLabel,
-                  ));
-                } else {
-                  await _ingredientService.addIngredient(Ingredient(
-                    id: '',
-                    name: name,
-                    freshQty: int.tryParse(qtyController.text.trim()) ?? 0,
-                    expiredQty: 0,
-                    unit: unitLabel,
-                  ));
-                }
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: Text(isEditing ? 'Save Changes' : 'Save'),
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      final name = nameController.text.trim();
+                      if (name.isEmpty) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('Name is required.'), behavior: SnackBarBehavior.floating),
+                        );
+                        return;
+                      }
+                      final unitLabel = unit == MeasurementUnit.custom
+                          ? customUnitController.text.trim()
+                          : unit.shortLabel;
+                      if (unitLabel.isEmpty) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('Enter a custom unit label.'), behavior: SnackBarBehavior.floating),
+                        );
+                        return;
+                      }
+
+                      num initialQty = 0;
+                      if (!isEditing) {
+                        initialQty = num.tryParse(qtyController.text.trim()) ?? 0;
+                        if (initialQty < 0 || initialQty > maxInputValue) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(
+                              content: Text('Enter a quantity between 0 and $maxInputValue.'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                          return;
+                        }
+                      }
+
+                      // If editing and the unit is changing, work out whether
+                      // it's a safely auto-convertible pair (g<->kg, ml<->L)
+                      // or not, and find any product recipes that reference
+                      // this ingredient.
+                      num? conversionFactor;
+                      List<Product> affectedProducts = [];
+                      if (isEditing && unitLabel != existing.unit) {
+                        conversionFactor = originalUnitEnum == null
+                            ? null
+                            : conversionFactorTo(originalUnitEnum, unit);
+                        final products = await _productService.getAllProducts();
+                        affectedProducts = products
+                            .where((p) => p.recipeIngredients.any((r) => r.ingredientId == existing.id))
+                            .toList();
+
+                        if (conversionFactor != null) {
+                          // Safe to auto-convert — still confirm, since this
+                          // changes stored numbers (stock + recipe lines).
+                          final newFresh = existing.freshQty * conversionFactor;
+                          final newExpired = existing.expiredQty * conversionFactor;
+                          if (ctx.mounted) {
+                            final proceed = await confirmAction(
+                              ctx,
+                              title: 'Convert ${existing.unit} → $unitLabel',
+                              message:
+                                  'Stock will be converted: ${existing.freshQty} ${existing.unit} fresh → '
+                                  '$newFresh $unitLabel, ${existing.expiredQty} ${existing.unit} expired → '
+                                  '$newExpired $unitLabel.'
+                                  '${affectedProducts.isEmpty ? '' : ' ${affectedProducts.length} recipe line(s) in '
+                                      '(${affectedProducts.map((p) => p.name).join(", ")}) will also be converted '
+                                      'automatically.'} Continue?',
+                              confirmLabel: 'Convert',
+                              confirmColor: AppColors.teal,
+                            );
+                            if (!proceed) return;
+                          }
+                        } else if (affectedProducts.isNotEmpty && ctx.mounted) {
+                          // Not safely convertible (piece/bottle/custom
+                          // involved) — same warning-only behavior as before.
+                          final proceed = await confirmAction(
+                            ctx,
+                            title: 'Unit Change Affects Recipes',
+                            message:
+                                'This ingredient is used in ${affectedProducts.length} product recipe(s) '
+                                '(${affectedProducts.map((p) => p.name).join(", ")}), which still reference the '
+                                'old unit "${existing.unit}". They will NOT be automatically updated to '
+                                '"$unitLabel" — you\'ll need to edit those recipes separately. Continue?',
+                            confirmLabel: 'Continue',
+                            confirmColor: AppColors.gold,
+                          );
+                          if (!proceed) return;
+                        }
+                      }
+
+                      setDialogState(() => isSaving = true);
+                      try {
+                        if (isEditing) {
+                          final newFreshQty = conversionFactor != null
+                              ? existing.freshQty * conversionFactor
+                              : existing.freshQty;
+                          final newExpiredQty = conversionFactor != null
+                              ? existing.expiredQty * conversionFactor
+                              : existing.expiredQty;
+
+                          await _ingredientService.updateIngredient(Ingredient(
+                            id: existing.id,
+                            name: name,
+                            freshQty: newFreshQty,
+                            expiredQty: newExpiredQty,
+                            unit: unitLabel,
+                          ));
+
+                          // Auto-convert this ingredient's recipe lines in
+                          // every affected product too, so Products/Recipes
+                          // stays consistent with the new unit.
+                          if (conversionFactor != null && affectedProducts.isNotEmpty) {
+                            for (final product in affectedProducts) {
+                              final updatedRecipe = product.recipeIngredients.map((r) {
+                                if (r.ingredientId != existing.id) return r;
+                                return RecipeItem(
+                                  ingredientId: r.ingredientId,
+                                  ingredientName: r.ingredientName,
+                                  qtyPerUnit: r.qtyPerUnit * conversionFactor!,
+                                  unit: unitLabel,
+                                );
+                              }).toList();
+                              await _productService.updateProduct(Product(
+                                id: product.id,
+                                name: product.name,
+                                price: product.price,
+                                recipeIngredients: updatedRecipe,
+                              ));
+                            }
+                          }
+                        } else {
+                          // Create with 0 stock first, then bring it up via a
+                          // real Stock In movement — so the initial quantity
+                          // actually shows up in the Stock Movement Log
+                          // instead of silently appearing out of nowhere.
+                          // Skipped entirely when initialQty is 0, so no
+                          // spurious log entry gets created.
+                          final newId = await _ingredientService.addIngredient(Ingredient(
+                            id: '',
+                            name: name,
+                            freshQty: 0,
+                            expiredQty: 0,
+                            unit: unitLabel,
+                          ));
+                          if (initialQty > 0) {
+                            await _inventoryService.recordStockMovement(
+                              itemId: newId,
+                              isIngredient: true,
+                              type: StockType.stockIn,
+                              qty: initialQty,
+                              note: 'Initial stock',
+                            );
+                          }
+                        }
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      } finally {
+                        // If the dialog is still around (e.g. an error was
+                        // thrown), let the user try again instead of being
+                        // stuck with a permanently-disabled button.
+                        setDialogState(() => isSaving = false);
+                      }
+                    },
+              child: Text(isSaving ? 'Saving...' : (isEditing ? 'Save Changes' : 'Save')),
             ),
           ],
         ),
@@ -201,53 +345,66 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
   Future<void> _stockMovement(Ingredient ingredient, StockType type) async {
     final qtyController = TextEditingController();
     final isIn = type == StockType.stockIn;
+    bool isSaving = false;
 
     await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          '${isIn ? "Stock In" : "Stock Out"}: ${ingredient.name}',
-          style: GoogleFonts.alfaSlabOne(fontSize: 17, color: AppColors.brown),
-        ),
-        content: TextField(
-          controller: qtyController,
-          autofocus: true,
-          decoration: InputDecoration(labelText: 'Quantity (${ingredient.unit})'),
-          keyboardType: TextInputType.number,
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: isIn ? AppColors.teal : AppColors.rust),
-            onPressed: () async {
-              final qty = int.tryParse(qtyController.text.trim()) ?? 0;
-              if (qty <= 0) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text('Enter a quantity greater than 0.'), behavior: SnackBarBehavior.floating),
-                );
-                return;
-              }
-              if (!isIn && qty > ingredient.freshQty) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  SnackBar(
-                    content: Text('Only ${ingredient.freshQty} ${ingredient.unit} fresh stock available.'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-                return;
-              }
-              await _inventoryService.recordStockMovement(
-                itemId: ingredient.id,
-                isIngredient: true,
-                type: type,
-                qty: qty,
-              );
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: Text(isIn ? 'Stock In' : 'Stock Out'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(
+            '${isIn ? "Stock In" : "Stock Out"}: ${ingredient.name}',
+            style: GoogleFonts.alfaSlabOne(fontSize: 17, color: AppColors.brown),
           ),
-        ],
+          content: TextField(
+            controller: qtyController,
+            autofocus: true,
+            decoration: InputDecoration(labelText: 'Quantity (${ingredient.unit})'),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          ),
+          actions: [
+            TextButton(onPressed: isSaving ? null : () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: isIn ? AppColors.teal : AppColors.rust),
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      final qty = num.tryParse(qtyController.text.trim()) ?? 0;
+                      if (qty <= 0 || qty > maxInputValue) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(
+                            content: Text('Enter a quantity between 0 and $maxInputValue.'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                        return;
+                      }
+                      if (!isIn && qty > ingredient.freshQty) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(
+                            content: Text('Only ${ingredient.freshQty} ${ingredient.unit} fresh stock available.'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                        return;
+                      }
+                      setDialogState(() => isSaving = true);
+                      try {
+                        await _inventoryService.recordStockMovement(
+                          itemId: ingredient.id,
+                          isIngredient: true,
+                          type: type,
+                          qty: qty,
+                        );
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      } finally {
+                        setDialogState(() => isSaving = false);
+                      }
+                    },
+              child: Text(isSaving ? 'Saving...' : (isIn ? 'Stock In' : 'Stock Out')),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -260,48 +417,59 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
       return;
     }
     final qtyController = TextEditingController(text: ingredient.freshQty.toString());
+    bool isSaving = false;
+
     await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Mark Expired: ${ingredient.name}', style: GoogleFonts.alfaSlabOne(fontSize: 17, color: AppColors.brown)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Fresh on hand: ${ingredient.freshQty} ${ingredient.unit}'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: qtyController,
-              decoration: InputDecoration(labelText: 'Expired Quantity (${ingredient.unit})'),
-              keyboardType: TextInputType.number,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text('Mark Expired: ${ingredient.name}', style: GoogleFonts.alfaSlabOne(fontSize: 17, color: AppColors.brown)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Fresh on hand: ${ingredient.freshQty} ${ingredient.unit}'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: qtyController,
+                decoration: InputDecoration(labelText: 'Expired Quantity (${ingredient.unit})'),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: isSaving ? null : () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.stopRed),
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      final qty = num.tryParse(qtyController.text.trim()) ?? 0;
+                      if (qty <= 0 || qty > ingredient.freshQty) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(
+                            content: Text('Enter a quantity between 0 and ${ingredient.freshQty}.'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                        return;
+                      }
+                      setDialogState(() => isSaving = true);
+                      try {
+                        await _lossService.markIngredientExpiredAndRecordLoss(
+                          ingredientId: ingredient.id,
+                          expiredQty: qty,
+                        );
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      } finally {
+                        setDialogState(() => isSaving = false);
+                      }
+                    },
+              child: Text(isSaving ? 'Saving...' : 'Confirm'),
             ),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.stopRed),
-            onPressed: () async {
-              final qty = int.tryParse(qtyController.text.trim()) ?? 0;
-              if (qty <= 0 || qty > ingredient.freshQty) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  SnackBar(
-                    content: Text('Enter a quantity between 1 and ${ingredient.freshQty}.'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-                return;
-              }
-              await _lossService.markIngredientExpiredAndRecordLoss(
-                ingredientId: ingredient.id,
-                expiredQty: qty,
-              );
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-            child: const Text('Confirm'),
-          ),
-        ],
       ),
     );
   }
@@ -436,87 +604,70 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
                               children: ingredients.map((ing) {
                                 return SizedBox(
                                   width: cardWidth,
-                                  child: Card(
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(ing.name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                                      ),
-                                      if (widget.canManageCatalog) ...[
-                                        IconButton(
-                                          icon: const Icon(Icons.edit_outlined, color: AppColors.teal),
-                                          onPressed: () => _showEditIngredientDialog(ing),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(Icons.delete_outline, color: AppColors.stopRed),
-                                          onPressed: () => _deleteIngredient(ing),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  // Fresh vs Expired shown side by side, not just a single total.
-                                  Row(
-                                    children: [
-                                      _StockPill(
-                                        label: 'Fresh',
-                                        value: '${ing.freshQty} ${ing.unit}',
-                                        color: AppColors.teal,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      _StockPill(
-                                        label: 'Expired',
-                                        value: '${ing.expiredQty} ${ing.unit}',
+                                  child: InfoListCard(
+                                    leadingIcon: Icons.kitchen,
+                                    accentColor: AppColors.rust,
+                                    title: ing.name,
+                                    idText: 'ID: ${ing.id}',
+                                    trailingAction: widget.canManageCatalog
+                                        ? Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              IconButton(
+                                                icon: const Icon(Icons.edit_outlined, color: AppColors.teal),
+                                                onPressed: () => _showEditIngredientDialog(ing),
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(Icons.delete_outline, color: AppColors.stopRed),
+                                                onPressed: () => _deleteIngredient(ing),
+                                              ),
+                                            ],
+                                          )
+                                        : null,
+                                    pills: [
+                                      StatPill(label: 'Fresh: ${ing.freshQty} ${ing.unit}', color: AppColors.teal),
+                                      StatPill(
+                                        label: 'Expired: ${ing.expiredQty} ${ing.unit}',
                                         color: ing.hasExpiredStock ? AppColors.stopRed : AppColors.cardBorder,
                                         muted: !ing.hasExpiredStock,
                                       ),
                                     ],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 6,
-                                    children: [
-                                      OutlinedButton.icon(
-                                        onPressed: () => _stockMovement(ing, StockType.stockIn),
-                                        icon: const Icon(Icons.add, size: 16),
-                                        label: const Text('Stock In'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: AppColors.teal,
-                                          side: const BorderSide(color: AppColors.teal),
-                                          visualDensity: VisualDensity.compact,
+                                    extra: Wrap(
+                                      spacing: 8,
+                                      runSpacing: 6,
+                                      children: [
+                                        OutlinedButton.icon(
+                                          onPressed: () => _stockMovement(ing, StockType.stockIn),
+                                          icon: const Icon(Icons.add, size: 16),
+                                          label: const Text('Stock In'),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: AppColors.teal,
+                                            side: const BorderSide(color: AppColors.teal),
+                                            visualDensity: VisualDensity.compact,
+                                          ),
                                         ),
-                                      ),
-                                      OutlinedButton.icon(
-                                        onPressed: () => _stockMovement(ing, StockType.stockOut),
-                                        icon: const Icon(Icons.remove, size: 16),
-                                        label: const Text('Stock Out'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: AppColors.rust,
-                                          side: const BorderSide(color: AppColors.rust),
-                                          visualDensity: VisualDensity.compact,
+                                        OutlinedButton.icon(
+                                          onPressed: () => _stockMovement(ing, StockType.stockOut),
+                                          icon: const Icon(Icons.remove, size: 16),
+                                          label: const Text('Stock Out'),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: AppColors.rust,
+                                            side: const BorderSide(color: AppColors.rust),
+                                            visualDensity: VisualDensity.compact,
+                                          ),
                                         ),
-                                      ),
-                                      OutlinedButton.icon(
-                                        onPressed: () => _markExpired(ing),
-                                        icon: const Icon(Icons.warning_amber, size: 16),
-                                        label: const Text('Mark Expired'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: AppColors.gold,
-                                          side: const BorderSide(color: AppColors.gold),
-                                          visualDensity: VisualDensity.compact,
+                                        OutlinedButton.icon(
+                                          onPressed: () => _markExpired(ing),
+                                          icon: const Icon(Icons.warning_amber, size: 16),
+                                          label: const Text('Mark Expired'),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: AppColors.gold,
+                                            side: const BorderSide(color: AppColors.gold),
+                                            visualDensity: VisualDensity.compact,
+                                          ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ),
+                                      ],
+                                    ),
                                   ),
                                 );
                               }).toList(),
@@ -535,31 +686,4 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
 
 /// Small rounded badge used to show "Fresh: 20 kg" / "Expired: 5 kg" side
 /// by side, instead of one combined total.
-class _StockPill extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  final bool muted;
 
-  const _StockPill({required this.label, required this.value, required this.color, this.muted = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: muted ? 0.08 : 0.15),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: muted ? 0.3 : 1)),
-      ),
-      child: Text(
-        '$label: $value',
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: muted ? AppColors.brown.withValues(alpha: 0.5) : AppColors.brown,
-        ),
-      ),
-    );
-  }
-}

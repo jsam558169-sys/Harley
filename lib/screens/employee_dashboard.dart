@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/ticket_nav_card.dart';
 import '../widgets/responsive.dart';
+import '../widgets/confirm_dialog.dart';
 import 'login_screen.dart';
 import 'ingredients_screen.dart';
 import 'pos_screen.dart';
@@ -37,6 +38,13 @@ class EmployeeDashboard extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
+              final confirmed = await confirmAction(
+                context,
+                title: 'Log Out',
+                message: 'Are you sure you want to log out?',
+                confirmLabel: 'Log Out',
+              );
+              if (!confirmed) return;
               await AuthService().logout();
               if (context.mounted) {
                 Navigator.of(context).pushReplacement(

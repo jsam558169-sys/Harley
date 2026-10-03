@@ -33,7 +33,7 @@ class LossEntry {
   final String id; // lossId
   final String itemId; // references ingredientId or finishedProductId
   final bool isIngredient; // which collection itemId belongs to — needed to resolve its name
-  final int lossQty;
+  final num lossQty;
   final LossReason lossReason;
   final DateTime lossDate;
 
@@ -61,7 +61,7 @@ class LossEntry {
       // Older entries predate this field — everything recorded so far has
       // been an ingredient loss, so that's the safe fallback.
       isIngredient: map['isIngredient'] ?? true,
-      lossQty: (map['lossQty'] ?? 0) as int,
+      lossQty: (map['lossQty'] ?? 0) as num,
       lossReason: lossReasonFromString(map['lossReason'] ?? 'other'),
       lossDate: (map['lossDate'] as Timestamp).toDate(),
     );

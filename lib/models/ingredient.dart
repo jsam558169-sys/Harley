@@ -5,8 +5,8 @@
 class Ingredient {
   final String id; // Firestore doc id (was ingredientId)
   final String name;
-  final int freshQty; // usable stock on hand
-  final int expiredQty; // stock moved out of usable inventory via "mark expired"
+  final num freshQty; // usable stock on hand — num, not int, so kg/L/g can be decimal
+  final num expiredQty; // stock moved out of usable inventory via "mark expired"
   final String unit; // e.g. "piece", "kg", "bottle", or a custom label
 
   Ingredient({
@@ -17,7 +17,7 @@ class Ingredient {
     this.unit = 'piece',
   });
 
-  int get totalQty => freshQty + expiredQty;
+  num get totalQty => freshQty + expiredQty;
   bool get hasExpiredStock => expiredQty > 0;
 
   Map<String, dynamic> toMap() => {
@@ -32,18 +32,18 @@ class Ingredient {
     // doc predates the fresh/expired split, so existing test data doesn't
     // just disappear — it's treated as all-fresh with nothing expired yet.
     final freshQty = map.containsKey('freshQty')
-        ? (map['freshQty'] ?? 0) as int
-        : (map['ingredientQty'] ?? 0) as int;
+        ? (map['freshQty'] ?? 0) as num
+        : (map['ingredientQty'] ?? 0) as num;
     return Ingredient(
       id: id,
       name: map['ingredientName'] ?? '',
       freshQty: freshQty,
-      expiredQty: (map['expiredQty'] ?? 0) as int,
+      expiredQty: (map['expiredQty'] ?? 0) as num,
       unit: map['unit'] ?? 'piece',
     );
   }
 
-  Ingredient copyWith({int? freshQty, int? expiredQty, String? unit}) => Ingredient(
+  Ingredient copyWith({num? freshQty, num? expiredQty, String? unit}) => Ingredient(
         id: id,
         name: name,
         freshQty: freshQty ?? this.freshQty,

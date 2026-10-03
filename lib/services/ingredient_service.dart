@@ -45,7 +45,7 @@ class IngredientService {
   /// calling this directly so a movement log entry always exists for the
   /// audit trail — this raw setter exists for internal use by other
   /// services (e.g. sales deduction).
-  Future<void> adjustFreshQty(String ingredientId, int delta) async {
+  Future<void> adjustFreshQty(String ingredientId, num delta) async {
     final ref = _col.doc(ingredientId);
     await _db.runTransaction((txn) async {
       final snap = await txn.get(ref);
@@ -59,7 +59,7 @@ class IngredientService {
   /// however much fresh stock actually exists). This is what "Mark Expired"
   /// calls — expired stock stays tracked and visible rather than just being
   /// subtracted away, so the UI can show "Fresh / Expired" side by side.
-  Future<void> markQuantityExpired(String ingredientId, int qtyToExpire) async {
+  Future<void> markQuantityExpired(String ingredientId, num qtyToExpire) async {
     final ref = _col.doc(ingredientId);
     await _db.runTransaction((txn) async {
       final snap = await txn.get(ref);
@@ -92,9 +92,10 @@ class IngredientService {
     return minServings ?? 0;
   }
 
-  /// Returns true if the product is at or below the low-stock threshold.
-  Future<bool> isLowStock(Product product) async {
+  /// Returns true if the product is at or below the given low-stock
+  /// threshold (falls back to the default if none is passed in).
+  Future<bool> isLowStock(Product product, {int threshold = defaultLowStockServingThreshold}) async {
     final servings = await servingsAvailable(product);
-    return servings <= lowStockServingThreshold;
+    return servings <= threshold;
   }
 }

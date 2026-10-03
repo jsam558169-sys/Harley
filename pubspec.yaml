@@ -20,6 +20,7 @@ dependencies:
   intl: ^0.19.0        # date formatting for reports
   uuid: ^4.4.0          # generating readable custom IDs if needed
   google_fonts: ^6.2.1  # Alfa Slab One + Nunito for the retro cafe theme
+  fl_chart: ^0.69.0     # Reports charts (Best Sellers, daily/weekly/monthly sold)
 
 dev_dependencies:
   flutter_test:

@@ -44,3 +44,32 @@ extension MeasurementUnitX on MeasurementUnit {
     }
   }
 }
+
+/// Returns the multiplier to convert a quantity from [from] to [to], or
+/// null if the pair isn't safely convertible without extra information.
+///
+/// Only metric weight (g ↔ kg) and volume (ml ↔ L) pairs have a fixed,
+/// universal ratio. "Piece" and "Bottle" sizes are ingredient-specific —
+/// a bottle of soy sauce isn't the same volume as a bottle of oil, and a
+/// "piece" could be any size — so those are never auto-converted; the
+/// admin has to adjust those manually.
+num? conversionFactorTo(MeasurementUnit from, MeasurementUnit to) {
+  if (from == to) return 1;
+
+  const weightInGrams = {
+    MeasurementUnit.gram: 1.0,
+    MeasurementUnit.kilogram: 1000.0,
+  };
+  const volumeInMl = {
+    MeasurementUnit.milliliter: 1.0,
+    MeasurementUnit.liter: 1000.0,
+  };
+
+  if (weightInGrams.containsKey(from) && weightInGrams.containsKey(to)) {
+    return weightInGrams[from]! / weightInGrams[to]!;
+  }
+  if (volumeInMl.containsKey(from) && volumeInMl.containsKey(to)) {
+    return volumeInMl[from]! / volumeInMl[to]!;
+  }
+  return null;
+}

@@ -98,7 +98,7 @@ class SalesService {
     for (final entry in requiredIngredientQty.entries) {
       final snap = await ingredientsCol.doc(entry.key).get();
       final data = snap.data();
-      final onHand = (data?['freshQty'] ?? 0) as int;
+      final onHand = (data?['freshQty'] ?? 0) as num;
       if (onHand < entry.value) {
         final name = (data?['ingredientName'] as String?);
         shortages.add(name == null || name.isEmpty ? entry.key : name);
@@ -122,7 +122,7 @@ class SalesService {
       // web-interop reason noted above.
       for (final entry in requiredIngredientQty.entries) {
         final onHand =
-            (ingredientSnaps[entry.key]?.data()?['freshQty'] ?? 0) as int;
+            (ingredientSnaps[entry.key]?.data()?['freshQty'] ?? 0) as num;
         final updated = onHand - entry.value;
         txn.update(ingredientsCol.doc(entry.key),
             {'freshQty': updated < 0 ? 0 : updated});
@@ -148,7 +148,7 @@ class SalesService {
           IngredientUsageEntry(
             id: usageDocRef.id,
             ingredientId: entry.key,
-            usageQty: entry.value.toInt(),
+            usageQty: entry.value,
             usageDate: now,
             sourceSalesTransId: saleDocRef.id,
           ).toMap(),
@@ -162,7 +162,7 @@ class SalesService {
             itemId: entry.key,
             isIngredient: true, // recipe deductions are always ingredients
             stockType: StockType.stockOut,
-            stockQty: entry.value.toInt(),
+            stockQty: entry.value,
             stockDate: now,
             note: 'Auto-deducted from sale ${saleDocRef.id}',
           ).toMap(),

@@ -5,9 +5,11 @@ import '../models/ingredient.dart';
 import '../models/measurement_unit.dart';
 import '../services/product_service.dart';
 import '../services/ingredient_service.dart';
+import '../services/collections.dart';
 import '../theme/app_colors.dart';
 import '../widgets/confirm_dialog.dart';
 import '../widgets/responsive.dart';
+import '../widgets/info_list_card.dart';
 
 enum ProductSortOption { nameAsc, nameDesc, priceAsc, priceDesc }
 
@@ -203,27 +205,29 @@ class _ProductsScreenState extends State<ProductsScreen> {
                               children: products.map((p) {
                                 return SizedBox(
                                   width: cardWidth,
-                                  child: Card(
-                                    child: ListTile(
-                                      title: Text(p.name, style: const TextStyle(fontWeight: FontWeight.w700)),
-                                      subtitle: Text(
-                                        '₱${p.price.toStringAsFixed(2)} • ${p.recipeIngredients.length} ingredient(s)',
-                                      ),
-                                      onTap: () => _goToEditProduct(p),
-                                      trailing: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          IconButton(
-                                            icon: const Icon(Icons.edit_outlined, color: AppColors.teal),
-                                            onPressed: () => _goToEditProduct(p),
-                                          ),
-                                          IconButton(
-                                            icon: const Icon(Icons.delete_outline, color: AppColors.stopRed),
-                                            onPressed: () => _deleteProduct(p),
-                                          ),
-                                        ],
-                                      ),
+                                  child: InfoListCard(
+                                    leadingIcon: Icons.restaurant_menu,
+                                    accentColor: AppColors.rust,
+                                    title: p.name,
+                                    idText: 'ID: ${p.id}',
+                                    onTap: () => _goToEditProduct(p),
+                                    trailingAction: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.edit_outlined, color: AppColors.teal),
+                                          onPressed: () => _goToEditProduct(p),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.delete_outline, color: AppColors.stopRed),
+                                          onPressed: () => _deleteProduct(p),
+                                        ),
+                                      ],
                                     ),
+                                    pills: [
+                                      StatPill(label: '₱${p.price.toStringAsFixed(2)}', color: AppColors.rust),
+                                      StatPill(label: '${p.recipeIngredients.length} ingredient(s)', color: AppColors.teal),
+                                    ],
                                   ),
                                 );
                               }).toList(),
@@ -259,6 +263,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
   late final List<RecipeItem> _recipe = List.of(widget.existing?.recipeIngredients ?? []);
   List<Ingredient> _availableIngredients = [];
   bool _loadingIngredients = true;
+  bool _saving = false;
 
   bool get _isEditing => widget.existing != null;
 
@@ -311,6 +316,7 @@ class _AddProductScreenState extends State<AddProductScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving) return; // guards against double-submit crashes from rapid taps
     final name = _nameController.text.trim();
     final price = double.tryParse(_priceController.text.trim());
 
@@ -326,19 +332,34 @@ class _AddProductScreenState extends State<AddProductScreen> {
       );
       return;
     }
-
-    final product = Product(
-      id: widget.existing?.id ?? '',
-      name: name,
-      price: price,
-      recipeIngredients: _recipe,
-    );
-    if (_isEditing) {
-      await _productService.updateProduct(product);
-    } else {
-      await _productService.addProduct(product);
+    if (price > maxInputValue) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Price can\'t exceed $maxInputValue.'),
+          backgroundColor: AppColors.stopRed,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
     }
-    if (mounted) Navigator.of(context).pop();
+
+    setState(() => _saving = true);
+    try {
+      final product = Product(
+        id: widget.existing?.id ?? '',
+        name: name,
+        price: price,
+        recipeIngredients: _recipe,
+      );
+      if (_isEditing) {
+        await _productService.updateProduct(product);
+      } else {
+        await _productService.addProduct(product);
+      }
+      if (mounted) Navigator.of(context).pop();
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -381,24 +402,37 @@ class _AddProductScreenState extends State<AddProductScreen> {
               child: Text('No ingredients added yet.'),
             )
           else
-            ..._recipe.map(
-              (line) => Card(
+            ..._recipe.map((line) {
+              final stillExists = _availableIngredients.any((ing) => ing.id == line.ingredientId);
+              return Card(
                 child: ListTile(
-                  title: Text(line.ingredientName),
-                  subtitle: Text('${line.qtyPerUnit} ${line.unit}'),
+                  leading: stillExists
+                      ? null
+                      : const Icon(Icons.warning_amber, color: AppColors.stopRed),
+                  title: Text(
+                    line.ingredientName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    stillExists
+                        ? '${line.qtyPerUnit} ${line.unit}'
+                        : '${line.qtyPerUnit} ${line.unit} • Ingredient deleted from catalog',
+                    style: stillExists ? null : const TextStyle(color: AppColors.stopRed, fontWeight: FontWeight.w600),
+                  ),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete_outline, color: AppColors.stopRed),
                     onPressed: () => _removeRecipeLine(line),
                   ),
                 ),
-              ),
-            ),
+              );
+            }),
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _save,
-              child: Text(_isEditing ? 'Save Changes' : 'Save Product'),
+              onPressed: _saving ? null : _save,
+              child: Text(_saving ? 'Saving...' : (_isEditing ? 'Save Changes' : 'Save Product')),
             ),
           ),
         ],
@@ -469,9 +503,9 @@ class _AddRecipeIngredientDialogState extends State<_AddRecipeIngredientDialog> 
 
   void _confirm() {
     final qty = num.tryParse(_qtyController.text.trim());
-    if (qty == null || qty <= 0) {
+    if (qty == null || qty <= 0 || qty > maxInputValue) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a quantity greater than 0.'), behavior: SnackBarBehavior.floating),
+        SnackBar(content: Text('Enter a quantity between 0 and $maxInputValue.'), behavior: SnackBarBehavior.floating),
       );
       return;
     }

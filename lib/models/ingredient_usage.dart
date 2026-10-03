@@ -7,7 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class IngredientUsageEntry {
   final String id; // usageId
   final String ingredientId;
-  final int usageQty;
+  final num usageQty;
   final DateTime usageDate;
   final String? sourceSalesTransId; // which sale caused this usage
 
@@ -30,7 +30,7 @@ class IngredientUsageEntry {
     return IngredientUsageEntry(
       id: id,
       ingredientId: map['ingredientId'] ?? '',
-      usageQty: (map['usageQty'] ?? 0) as int,
+      usageQty: (map['usageQty'] ?? 0) as num,
       usageDate: (map['usageDate'] as Timestamp).toDate(),
       sourceSalesTransId: map['sourceSalesTransId'],
     );

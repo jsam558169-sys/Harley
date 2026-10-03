@@ -41,21 +41,61 @@ extension on SortOption {
   }
 }
 
-/// How many units of [product] can currently be prepared, based on FRESH
-/// stock of each recipe ingredient — same formula as
-/// IngredientService.servingsAvailable(), but computed synchronously from
-/// an already-loaded ingredients list so the POS grid can sort/filter/badge
-/// products live without a Firestore round-trip per product.
-int _computeServings(Product product, Map<String, Ingredient> ingredientsById) {
-  if (product.recipeIngredients.isEmpty) return 0;
-  int? minServings;
-  for (final item in product.recipeIngredients) {
-    final ingredient = ingredientsById[item.ingredientId];
-    if (ingredient == null || item.qtyPerUnit <= 0) return 0;
-    final possible = (ingredient.freshQty / item.qtyPerUnit).floor();
-    if (minServings == null || possible < minServings) minServings = possible;
+/// How many of each product could be added to the cart right now, given
+/// current FRESH stock minus whatever every OTHER cart line already
+/// reserves from shared ingredients. This is what actually lets POS catch
+/// "these two products both need eggs, and together you've run out" at
+/// add-to-cart time instead of only discovering it when checkout fails.
+///
+/// A product's own existing cart quantity does NOT count against itself —
+/// only what *other* products in the cart draw from the same ingredients.
+/// So this answers "how many total of X could the cart hold right now",
+/// which the UI then compares against the current cart quantity to decide
+/// whether "+" should still be enabled.
+Map<String, int> _computeServingsAccountingForCart(
+  List<Product> allProducts,
+  Map<String, Ingredient> ingredientsById,
+  Map<String, int> cart,
+) {
+  final productsById = {for (final p in allProducts) p.id: p};
+
+  // Total reserved per ingredient across every line currently in the cart.
+  final totalReserved = <String, num>{};
+  for (final entry in cart.entries) {
+    final product = productsById[entry.key];
+    if (product == null) continue;
+    for (final item in product.recipeIngredients) {
+      totalReserved.update(
+        item.ingredientId,
+        (v) => v + item.qtyPerUnit * entry.value,
+        ifAbsent: () => item.qtyPerUnit * entry.value,
+      );
+    }
   }
-  return minServings ?? 0;
+
+  final result = <String, int>{};
+  for (final product in allProducts) {
+    if (product.recipeIngredients.isEmpty) {
+      result[product.id] = 0;
+      continue;
+    }
+    int? minServings;
+    for (final item in product.recipeIngredients) {
+      final ingredient = ingredientsById[item.ingredientId];
+      if (ingredient == null || item.qtyPerUnit <= 0) {
+        minServings = 0;
+        break;
+      }
+      final ownCartQty = cart[product.id] ?? 0;
+      final ownReservation = item.qtyPerUnit * ownCartQty;
+      final reservedByOthers = (totalReserved[item.ingredientId] ?? 0) - ownReservation;
+      final effectiveFresh = ingredient.freshQty - reservedByOthers;
+      final possible = (effectiveFresh / item.qtyPerUnit).floor();
+      if (minServings == null || possible < minServings) minServings = possible;
+    }
+    result[product.id] = (minServings ?? 0) < 0 ? 0 : (minServings ?? 0);
+  }
+  return result;
 }
 
 /// The actual point-of-sale screen: search/sort the menu, pick products and
@@ -270,9 +310,7 @@ class _PosScreenState extends State<PosScreen> {
               final ingredientsById = {
                 for (final i in ingredientSnapshot.data!) i.id: i,
               };
-              final servingsByProduct = {
-                for (final p in allProducts) p.id: _computeServings(p, ingredientsById),
-              };
+              final servingsByProduct = _computeServingsAccountingForCart(allProducts, ingredientsById, _cart);
 
               final products = _filterAndSort(allProducts, servingsByProduct);
               final total = _computeTotal(allProducts);

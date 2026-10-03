@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/ticket_nav_card.dart';
 import '../widgets/responsive.dart';
+import '../widgets/confirm_dialog.dart';
 import 'login_screen.dart';
 import 'products_screen.dart';
 import 'ingredients_screen.dart';
@@ -33,7 +34,7 @@ class AdminDashboard extends StatelessWidget {
       _MenuItem('Products / Recipes', Icons.restaurant_menu, (ctx) => const ProductsScreen()),
       _MenuItem('Ingredients & Stock', Icons.inventory_2, (ctx) => const IngredientsScreen(canManageCatalog: true)),
       _MenuItem('Stock Movement Log', Icons.swap_vert, (ctx) => const InventoryMovementsScreen()),
-      _MenuItem('Low Stock Alerts', Icons.warning_amber, (ctx) => const LowStockScreen()),
+      _MenuItem('Low Stock Alerts', Icons.warning_amber, (ctx) => const LowStockScreen(canEditThreshold: true)),
       _MenuItem('Losses', Icons.remove_shopping_cart, (ctx) => const LossesScreen()),
       _MenuItem('Reports (Sales + Usage)', Icons.bar_chart, (ctx) => const ReportsScreen(showSalesFigures: true)),
     ];
@@ -45,6 +46,13 @@ class AdminDashboard extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
+              final confirmed = await confirmAction(
+                context,
+                title: 'Log Out',
+                message: 'Are you sure you want to log out?',
+                confirmLabel: 'Log Out',
+              );
+              if (!confirmed) return;
               await AuthService().logout();
               if (context.mounted) {
                 Navigator.of(context).pushReplacement(

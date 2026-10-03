@@ -38,7 +38,7 @@ class LossService {
   ///   2. Writes a loss entry with reason "expired".
   Future<void> markIngredientExpiredAndRecordLoss({
     required String ingredientId,
-    required int expiredQty,
+    required num expiredQty,
   }) async {
     await _ingredientService.markQuantityExpired(ingredientId, expiredQty);
     await recordLoss(LossEntry(
@@ -57,7 +57,7 @@ class LossService {
   Future<void> recordReplacedOrderLoss({
     required String itemId,
     required bool isIngredient,
-    required int qty,
+    required num qty,
   }) {
     return recordLoss(LossEntry(
       id: '',
