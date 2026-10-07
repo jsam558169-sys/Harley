@@ -10,13 +10,13 @@ import 'products_screen.dart';
 import 'ingredients_screen.dart';
 import 'pos_screen.dart';
 import 'reports_screen.dart';
-import 'losses_screen.dart';
 import 'low_stock_screen.dart';
 import 'inventory_movements_screen.dart';
 
 /// Owner/Admin dashboard: every operational screen an Employee has, plus
-/// menu/recipe management, full sales+usage reports, and loss oversight.
-/// User accounts (Owner/Employee) are managed directly in Firestore, so
+/// menu/recipe management and full Reports (which now also includes Losses
+/// as one of its report views). User accounts (Owner/Employee) are managed
+/// directly in Firestore, so
 /// there's no in-app "register user" flow — see the README for how to add
 /// one via the Firebase console.
 ///
@@ -35,8 +35,7 @@ class AdminDashboard extends StatelessWidget {
       _MenuItem('Ingredients & Stock', Icons.inventory_2, (ctx) => const IngredientsScreen(canManageCatalog: true)),
       _MenuItem('Stock Movement Log', Icons.swap_vert, (ctx) => const InventoryMovementsScreen()),
       _MenuItem('Low Stock Alerts', Icons.warning_amber, (ctx) => const LowStockScreen(canEditThreshold: true)),
-      _MenuItem('Losses', Icons.remove_shopping_cart, (ctx) => const LossesScreen()),
-      _MenuItem('Reports (Sales + Usage)', Icons.bar_chart, (ctx) => const ReportsScreen(showSalesFigures: true)),
+      _MenuItem('Reports', Icons.bar_chart, (ctx) => const ReportsScreen(showSalesFigures: true)),
     ];
 
     return Scaffold(

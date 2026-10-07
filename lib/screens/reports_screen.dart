@@ -4,9 +4,13 @@ import 'package:intl/intl.dart';
 import '../models/sales_report.dart';
 import '../models/product.dart';
 import '../models/ingredient.dart';
+import '../models/finished_product.dart';
+import '../models/loss.dart';
 import '../services/report_service.dart';
 import '../services/ingredient_service.dart';
 import '../services/product_service.dart';
+import '../services/finished_product_service.dart';
+import '../services/loss_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/responsive.dart';
 import '../widgets/info_list_card.dart';
@@ -14,9 +18,42 @@ import '../widgets/bar_charts.dart';
 import '../widgets/pagination_bar.dart';
 import '../widgets/section_panel.dart';
 
-enum _ProductSortOption { nameAsc, nameDesc, lastSoldNewest, lastSoldOldest, monthlySoldHigh, monthlySoldLow }
+enum _ProductSortOption { nameAsc, nameDesc, lastSoldNewest, lastSoldOldest, soldHigh, soldLow }
 
-enum _BestSellerPeriod { daily, weekly, monthly }
+enum _LossSortOption { dateNewest, dateOldest, nameAsc, nameDesc }
+
+enum _ReportView { salesSummary, bestSellers, productSales, losses, ingredientUsage }
+
+extension on _LossSortOption {
+  String get label {
+    switch (this) {
+      case _LossSortOption.dateNewest:
+        return 'Date (Newest First)';
+      case _LossSortOption.dateOldest:
+        return 'Date (Oldest First)';
+      case _LossSortOption.nameAsc:
+        return 'Name (A–Z)';
+      case _LossSortOption.nameDesc:
+        return 'Name (Z–A)';
+    }
+  }
+}
+
+// NOTE: LossReason still has expired/spoiled/replacedOrder/other, but only
+// "expired" has an actual UI path that creates one (Mark Expired on the
+// Ingredients & Stock screen).
+Color _reasonColor(LossReason r) {
+  switch (r) {
+    case LossReason.expired:
+      return AppColors.stopRed;
+    case LossReason.spoiled:
+      return AppColors.rust;
+    case LossReason.replacedOrder:
+      return AppColors.gold;
+    case LossReason.other:
+      return AppColors.teal;
+  }
+}
 
 extension on _ProductSortOption {
   String get label {
@@ -29,22 +66,34 @@ extension on _ProductSortOption {
         return 'Last Sold (Newest First)';
       case _ProductSortOption.lastSoldOldest:
         return 'Last Sold (Oldest First)';
-      case _ProductSortOption.monthlySoldHigh:
-        return 'Monthly Sold (High–Low)';
-      case _ProductSortOption.monthlySoldLow:
-        return 'Monthly Sold (Low–High)';
+      case _ProductSortOption.soldHigh:
+        return 'Sold (High–Low)';
+      case _ProductSortOption.soldLow:
+        return 'Sold (Low–High)';
     }
   }
 }
 
-/// Generates and displays daily/weekly/monthly sales reports, a searchable
-/// per-product sales breakdown (with charts), a Best Sellers chart, and an
-/// ingredient usage summary — each laid out as its own section panel.
+String _periodLabel(ReportPeriod p) {
+  switch (p) {
+    case ReportPeriod.daily:
+      return 'Daily';
+    case ReportPeriod.weekly:
+      return 'Weekly';
+    case ReportPeriod.monthly:
+      return 'Monthly';
+  }
+}
+
+/// Reports screen: ONE period selector (Daily/Weekly/Monthly) drives every
+/// graph on this screen, and a report-type picker shows a single section
+/// at a time (Sales Summary / Best Sellers / Product Sales / Ingredient
+/// Usage) instead of stacking everything into one long scroll.
 class ReportsScreen extends StatefulWidget {
-  /// Owner/Admin sees full sales figures + the per-product breakdown
-  /// (which reveals price, and therefore revenue). Employees (per the
-  /// feasibility study) only get the ingredient usage summary, so this is
-  /// false on the Employee dashboard.
+  /// Owner/Admin sees full sales figures + Best Sellers + Product Sales
+  /// (which reveal price, and therefore revenue). Employees (per the
+  /// feasibility study) only get Sales Summary (items only) and
+  /// Ingredient Usage.
   final bool showSalesFigures;
 
   const ReportsScreen({super.key, this.showSalesFigures = true});
@@ -57,56 +106,71 @@ class _ReportsScreenState extends State<ReportsScreen> {
   final _reportService = ReportService();
   final _ingredientService = IngredientService();
   final _productService = ProductService();
+  final _finishedProductService = FinishedProductService();
+  final _lossService = LossService();
   final _productSearchController = TextEditingController();
+  final _lossSearchController = TextEditingController();
   final _dateFormat = DateFormat('MMM d, y');
+  final _lossDateFormat = DateFormat('MMM d, y  h:mm a');
+
+  ReportPeriod _period = ReportPeriod.daily;
+  late _ReportView _view;
 
   // Aggregate report (period-based).
-  ReportPeriod _period = ReportPeriod.daily;
   SalesReport? _report;
   Map<String, num>? _usageSummary;
   bool _loadingAggregate = false;
   int _usagePageSize = defaultPageSizeOptions.first;
   int _usagePage = 0;
 
-  // Per-product breakdown (always shows daily/weekly/monthly together,
-  // independent of the period selector above).
+  // Per-product breakdown — loaded once with daily/weekly/monthly all
+  // together; which one is actually shown is picked at render time based
+  // on the global period selector above.
   List<Product> _products = [];
   Map<String, ProductSalesStat> _productBreakdown = {};
   bool _loadingProducts = false;
   String _productSearchQuery = '';
-  _ProductSortOption _productSort = _ProductSortOption.nameAsc;
+  _ProductSortOption _productSort = _ProductSortOption.soldHigh;
   int _productPageSize = defaultPageSizeOptions.first;
   int _productPage = 0;
 
-  _BestSellerPeriod _bestSellerPeriod = _BestSellerPeriod.daily;
+  // Losses — moved in from its own former screen, now scoped to the same
+  // global period as everything else here.
+  String _lossSearchQuery = '';
+  _LossSortOption _lossSort = _LossSortOption.dateNewest;
+  int _lossPageSize = defaultPageSizeOptions.first;
+  int _lossPage = 0;
 
   @override
   void initState() {
     super.initState();
+    _view = _ReportView.salesSummary;
     _generateAggregate();
     if (widget.showSalesFigures) _loadProductBreakdown();
+  }
+
+  DateTime _periodStart(ReportPeriod period) {
+    final now = DateTime.now();
+    switch (period) {
+      case ReportPeriod.daily:
+        return DateTime(now.year, now.month, now.day);
+      case ReportPeriod.weekly:
+        return now.subtract(Duration(days: now.weekday - 1));
+      case ReportPeriod.monthly:
+        return DateTime(now.year, now.month, 1);
+    }
   }
 
   Future<void> _generateAggregate() async {
     setState(() {
       _loadingAggregate = true;
       _usagePage = 0;
+      _lossPage = 0;
     });
     final report = await _reportService.generateSalesReport(period: _period);
 
     final now = DateTime.now();
-    DateTime start;
-    switch (_period) {
-      case ReportPeriod.daily:
-        start = DateTime(now.year, now.month, now.day);
-        break;
-      case ReportPeriod.weekly:
-        start = now.subtract(Duration(days: now.weekday - 1));
-        break;
-      case ReportPeriod.monthly:
-        start = DateTime(now.year, now.month, 1);
-        break;
-    }
+    final start = _periodStart(_period);
     final usage = await _reportService.generateIngredientUsageSummary(start: start, end: now);
 
     if (!mounted) return;
@@ -129,6 +193,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
     });
   }
 
+  int _soldForPeriod(Product p, ReportPeriod period) {
+    final stat = _productBreakdown[p.id];
+    if (stat == null) return 0;
+    switch (period) {
+      case ReportPeriod.daily:
+        return stat.dailySold;
+      case ReportPeriod.weekly:
+        return stat.weeklySold;
+      case ReportPeriod.monthly:
+        return stat.monthlySold;
+    }
+  }
+
   List<Product> _filterSortProducts() {
     var result = _products.where((p) {
       if (_productSearchQuery.trim().isEmpty) return true;
@@ -139,7 +216,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
     // possible date so they sort predictably to one end.
     DateTime lastSold(Product p) =>
         _productBreakdown[p.id]?.lastSoldDate ?? DateTime.fromMillisecondsSinceEpoch(0);
-    int monthlySold(Product p) => _productBreakdown[p.id]?.monthlySold ?? 0;
 
     switch (_productSort) {
       case _ProductSortOption.nameAsc:
@@ -154,313 +230,530 @@ class _ReportsScreenState extends State<ReportsScreen> {
       case _ProductSortOption.lastSoldOldest:
         result.sort((a, b) => lastSold(a).compareTo(lastSold(b)));
         break;
-      case _ProductSortOption.monthlySoldHigh:
-        result.sort((a, b) => monthlySold(b).compareTo(monthlySold(a)));
+      case _ProductSortOption.soldHigh:
+        result.sort((a, b) => _soldForPeriod(b, _period).compareTo(_soldForPeriod(a, _period)));
         break;
-      case _ProductSortOption.monthlySoldLow:
-        result.sort((a, b) => monthlySold(a).compareTo(monthlySold(b)));
+      case _ProductSortOption.soldLow:
+        result.sort((a, b) => _soldForPeriod(a, _period).compareTo(_soldForPeriod(b, _period)));
         break;
     }
     return result;
   }
 
-  int _soldForBestSeller(Product p) {
-    final stat = _productBreakdown[p.id];
-    if (stat == null) return 0;
-    switch (_bestSellerPeriod) {
-      case _BestSellerPeriod.daily:
-        return stat.dailySold;
-      case _BestSellerPeriod.weekly:
-        return stat.weeklySold;
-      case _BestSellerPeriod.monthly:
-        return stat.monthlySold;
+  Map<_ReportView, String> get _availableViews => {
+        _ReportView.salesSummary: 'Sales Summary',
+        if (widget.showSalesFigures) _ReportView.bestSellers: 'Best Sellers',
+        if (widget.showSalesFigures) _ReportView.productSales: 'Product Sales',
+        if (widget.showSalesFigures) _ReportView.losses: 'Losses',
+        _ReportView.ingredientUsage: 'Ingredient Usage',
+      };
+
+  List<LossEntry> _filterSortLosses(List<LossEntry> entries, Map<String, String> nameMap) {
+    String nameOf(LossEntry e) => nameMap[e.itemId] ?? e.itemId;
+    final start = _periodStart(_period);
+
+    var result = entries.where((e) {
+      if (e.lossDate.isBefore(start)) return false;
+      if (_lossSearchQuery.trim().isEmpty) return true;
+      final q = _lossSearchQuery.trim().toLowerCase();
+      return nameOf(e).toLowerCase().contains(q) || e.itemId.toLowerCase().contains(q);
+    }).toList();
+
+    switch (_lossSort) {
+      case _LossSortOption.dateNewest:
+        result.sort((a, b) => b.lossDate.compareTo(a.lossDate));
+        break;
+      case _LossSortOption.dateOldest:
+        result.sort((a, b) => a.lossDate.compareTo(b.lossDate));
+        break;
+      case _LossSortOption.nameAsc:
+        result.sort((a, b) => nameOf(a).toLowerCase().compareTo(nameOf(b).toLowerCase()));
+        break;
+      case _LossSortOption.nameDesc:
+        result.sort((a, b) => nameOf(b).toLowerCase().compareTo(nameOf(a).toLowerCase()));
+        break;
     }
+    return result;
+  }
+
+  Widget _choiceChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onSelected,
+    Color color = AppColors.rust,
+  }) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onSelected(),
+      selectedColor: color.withValues(alpha: 0.2),
+      labelStyle: TextStyle(color: selected ? color : AppColors.brown, fontWeight: FontWeight.w700),
+      side: BorderSide(color: selected ? color : AppColors.cardBorder),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Reports')),
+      body: Column(
+        children: [
+          // Global period selector — every graph below reacts to this.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                children: ReportPeriod.values.map((p) {
+                  return _choiceChip(
+                    label: _periodLabel(p),
+                    selected: _period == p,
+                    color: AppColors.rust,
+                    onSelected: () {
+                      setState(() => _period = p);
+                      _generateAggregate();
+                    },
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          // Report-type picker — shows one section at a time.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _availableViews.entries.map((e) {
+                  return _choiceChip(
+                    label: e.value,
+                    selected: _view == e.key,
+                    color: AppColors.teal,
+                    onSelected: () => setState(() => _view = e.key),
+                  );
+                }).toList(),
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(child: _buildSelectedView()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSelectedView() {
+    switch (_view) {
+      case _ReportView.salesSummary:
+        return _buildSalesSummaryView();
+      case _ReportView.bestSellers:
+        return _buildBestSellersView();
+      case _ReportView.productSales:
+        return _buildProductSalesView();
+      case _ReportView.losses:
+        return _buildLossesView();
+      case _ReportView.ingredientUsage:
+        return _buildIngredientUsageView();
+    }
+  }
+
+  Widget _buildSalesSummaryView() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: SectionPanel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${_periodLabel(_period)} Sales Summary', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+            const SizedBox(height: 12),
+            if (_loadingAggregate) const Center(child: CircularProgressIndicator()),
+            if (!_loadingAggregate && _report != null)
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  if (widget.showSalesFigures) ...[
+                    _StatHighlight(
+                      label: 'Total Sales',
+                      value: '₱${_report!.totalSales.toStringAsFixed(2)}',
+                      color: AppColors.rust,
+                    ),
+                    _StatHighlight(
+                      label: 'Total Transactions',
+                      value: '${_report!.totalTransactions}',
+                      color: AppColors.teal,
+                    ),
+                  ],
+                  _StatHighlight(
+                    label: 'Total Items Sold',
+                    value: '${_report!.totalItemsSold}',
+                    color: AppColors.gold,
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBestSellersView() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: SectionPanel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Best Sellers — ${_periodLabel(_period)}', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+            const SizedBox(height: 8),
+            if (_loadingProducts)
+              const Center(child: CircularProgressIndicator())
+            else
+              Builder(builder: (context) {
+                final ranked = _products.where((p) => _soldForPeriod(p, _period) > 0).toList()
+                  ..sort((a, b) => _soldForPeriod(b, _period).compareTo(_soldForPeriod(a, _period)));
+                final top = ranked.take(5).toList();
+                if (top.isEmpty) {
+                  return Text('No sales recorded for this ${_periodLabel(_period).toLowerCase()} period yet.');
+                }
+                return RankedBarChart(
+                  entries: top.map((p) => MapEntry(p.name, _soldForPeriod(p, _period))).toList(),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProductSalesView() {
     final filteredProducts = _filterSortProducts();
     final productPageItems = paginate(filteredProducts, _productPage, _productPageSize);
+    final maxOnPage = productPageItems.isEmpty
+        ? 0
+        : productPageItems.map((p) => _soldForPeriod(p, _period)).reduce((a, b) => a > b ? a : b);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: SectionPanel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Product Sales — ${_periodLabel(_period)}', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _productSearchController,
+                    onChanged: (v) => setState(() {
+                      _productSearchQuery = v;
+                      _productPage = 0;
+                    }),
+                    decoration: InputDecoration(
+                      hintText: 'Search products...',
+                      prefixIcon: const Icon(Icons.search, color: AppColors.rust),
+                      isDense: true,
+                      suffixIcon: _productSearchQuery.isEmpty
+                          ? null
+                          : IconButton(
+                              icon: const Icon(Icons.clear, size: 20),
+                              onPressed: () => setState(() {
+                                _productSearchController.clear();
+                                _productSearchQuery = '';
+                                _productPage = 0;
+                              }),
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                PopupMenuButton<_ProductSortOption>(
+                  icon: const Icon(Icons.swap_vert, color: AppColors.rust),
+                  tooltip: 'Sort products',
+                  initialValue: _productSort,
+                  onSelected: (option) => setState(() {
+                    _productSort = option;
+                    _productPage = 0;
+                  }),
+                  itemBuilder: (context) => _ProductSortOption.values
+                      .map((option) => PopupMenuItem(
+                            value: option,
+                            child: Row(
+                              children: [
+                                Text(option.label),
+                                if (option == _productSort) ...[
+                                  const Spacer(),
+                                  const Icon(Icons.check, size: 18, color: AppColors.rust),
+                                ],
+                              ],
+                            ),
+                          ))
+                      .toList(),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.refresh, color: AppColors.rust),
+                  tooltip: 'Refresh',
+                  onPressed: _loadProductBreakdown,
+                ),
+              ],
+            ),
+            if (!_loadingProducts && filteredProducts.isNotEmpty)
+              PaginationBar(
+                pageSize: _productPageSize,
+                currentPage: _productPage,
+                totalItems: filteredProducts.length,
+                onPageSizeChanged: (size) => setState(() {
+                  _productPageSize = size;
+                  _productPage = 0;
+                }),
+                onPageChanged: (page) => setState(() => _productPage = page),
+              ),
+            const SizedBox(height: 8),
+            if (_loadingProducts) const Center(child: CircularProgressIndicator()),
+            if (!_loadingProducts && _products.isEmpty) const Text('No products yet.'),
+            if (!_loadingProducts && _products.isNotEmpty && filteredProducts.isEmpty)
+              Text('No products match "$_productSearchQuery".'),
+            if (!_loadingProducts)
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final columns = gridColumnsForWidth(constraints.maxWidth);
+                  final cardWidth = wrapCardWidth(constraints.maxWidth, columns);
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: productPageItems.map((p) {
+                      final stat = _productBreakdown[p.id] ?? ProductSalesStat.zero;
+                      final sold = _soldForPeriod(p, _period);
+                      return SizedBox(
+                        width: cardWidth,
+                        child: InfoListCard(
+                          leadingIcon: Icons.shopping_bag_outlined,
+                          accentColor: AppColors.rust,
+                          title: p.name,
+                          idText: 'ID: ${p.id}',
+                          pills: [
+                            StatPill(label: '₱${p.price.toStringAsFixed(2)}', color: AppColors.rust),
+                          ],
+                          extra: Row(
+                            children: [
+                              SingleValueBarChart(value: sold, maxValue: maxOnPage),
+                              const SizedBox(width: 8),
+                              Text('$sold sold', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.teal)),
+                            ],
+                          ),
+                          footerText: stat.lastSoldDate == null
+                              ? 'Not sold yet'
+                              : 'Last sold: ${_dateFormat.format(stat.lastSoldDate!)}',
+                        ),
+                      );
+                    }).toList(),
+                  );
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLossesView() {
+    return StreamBuilder<List<Ingredient>>(
+      stream: _ingredientService.watchIngredients(),
+      builder: (context, ingredientSnap) {
+        if (!ingredientSnap.hasData) return const Center(child: CircularProgressIndicator());
+
+        return StreamBuilder<List<FinishedProduct>>(
+          stream: _finishedProductService.watchAll(),
+          builder: (context, finishedSnap) {
+            if (!finishedSnap.hasData) return const Center(child: CircularProgressIndicator());
+
+            final nameMap = {
+              for (final i in ingredientSnap.data!) i.id: i.name,
+              for (final f in finishedSnap.data!) f.id: f.name,
+            };
+
+            return StreamBuilder<List<LossEntry>>(
+              stream: _lossService.watchLosses(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                final losses = _filterSortLosses(snapshot.data!, nameMap);
+                final totalQty = losses.fold<num>(0, (sum, e) => sum + e.lossQty);
+                final lossPageItems = paginate(losses, _lossPage, _lossPageSize);
+
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: SectionPanel(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Losses — ${_periodLabel(_period)}', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: _lossSearchController,
+                                onChanged: (v) => setState(() {
+                                  _lossSearchQuery = v;
+                                  _lossPage = 0;
+                                }),
+                                decoration: InputDecoration(
+                                  hintText: 'Search by item name or ID...',
+                                  prefixIcon: const Icon(Icons.search, color: AppColors.rust),
+                                  isDense: true,
+                                  suffixIcon: _lossSearchQuery.isEmpty
+                                      ? null
+                                      : IconButton(
+                                          icon: const Icon(Icons.clear, size: 20),
+                                          onPressed: () => setState(() {
+                                            _lossSearchController.clear();
+                                            _lossSearchQuery = '';
+                                            _lossPage = 0;
+                                          }),
+                                        ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            PopupMenuButton<_LossSortOption>(
+                              icon: const Icon(Icons.swap_vert, color: AppColors.rust),
+                              tooltip: 'Sort losses',
+                              initialValue: _lossSort,
+                              onSelected: (option) => setState(() {
+                                _lossSort = option;
+                                _lossPage = 0;
+                              }),
+                              itemBuilder: (context) => _LossSortOption.values
+                                  .map((option) => PopupMenuItem(
+                                        value: option,
+                                        child: Row(
+                                          children: [
+                                            Text(option.label),
+                                            if (option == _lossSort) ...[
+                                              const Spacer(),
+                                              const Icon(Icons.check, size: 18, color: AppColors.rust),
+                                            ],
+                                          ],
+                                        ),
+                                      ))
+                                  .toList(),
+                            ),
+                          ],
+                        ),
+                        if (losses.isNotEmpty)
+                          PaginationBar(
+                            pageSize: _lossPageSize,
+                            currentPage: _lossPage,
+                            totalItems: losses.length,
+                            onPageSizeChanged: (size) => setState(() {
+                              _lossPageSize = size;
+                              _lossPage = 0;
+                            }),
+                            onPageChanged: (page) => setState(() => _lossPage = page),
+                          ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Text(
+                            '${losses.length} loss entr${losses.length == 1 ? "y" : "ies"} • $totalQty total unit${totalQty == 1 ? "" : "s"} lost this ${_periodLabel(_period).toLowerCase()} period',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.brown.withValues(alpha: 0.7)),
+                          ),
+                        ),
+                        if (losses.isEmpty)
+                          const Text('No losses recorded for this period.')
+                        else
+                          Column(
+                            children: lossPageItems.map((loss) {
+                              final name = nameMap[loss.itemId] ?? loss.itemId;
+                              final color = _reasonColor(loss.lossReason);
+                              return InfoListCard(
+                                leadingIcon: Icons.remove_shopping_cart,
+                                accentColor: color,
+                                title: name,
+                                idText: 'ID: ${loss.itemId}',
+                                badgeText: loss.isIngredient ? 'Ingredient' : 'Finished Product',
+                                pills: [
+                                  StatPill(label: lossReasonToString(loss.lossReason), color: color),
+                                  StatPill(label: 'Qty: ${loss.lossQty}', color: AppColors.brown, muted: true),
+                                ],
+                                footerText: _lossDateFormat.format(loss.lossDate),
+                              );
+                            }).toList(),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildIngredientUsageView() {
     final usageEntries = _usageSummary?.entries.toList() ?? [];
     final usagePageItems = paginate(usageEntries, _usagePage, _usagePageSize);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Reports')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // --- Aggregate report ---
-          SectionPanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Sales Summary', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
-                const SizedBox(height: 10),
-                DropdownButton<ReportPeriod>(
-                  value: _period,
-                  items: const [
-                    DropdownMenuItem(value: ReportPeriod.daily, child: Text('Daily')),
-                    DropdownMenuItem(value: ReportPeriod.weekly, child: Text('Weekly')),
-                    DropdownMenuItem(value: ReportPeriod.monthly, child: Text('Monthly')),
-                  ],
-                  onChanged: (v) {
-                    setState(() => _period = v!);
-                    _generateAggregate();
-                  },
-                ),
-                const SizedBox(height: 12),
-                if (_loadingAggregate) const Center(child: CircularProgressIndicator()),
-                if (!_loadingAggregate && _report != null)
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      if (widget.showSalesFigures) ...[
-                        _StatHighlight(
-                          label: 'Total Sales',
-                          value: '₱${_report!.totalSales.toStringAsFixed(2)}',
-                          color: AppColors.rust,
-                        ),
-                        _StatHighlight(
-                          label: 'Total Transactions',
-                          value: '${_report!.totalTransactions}',
-                          color: AppColors.teal,
-                        ),
-                      ],
-                      _StatHighlight(
-                        label: 'Total Items Sold',
-                        value: '${_report!.totalItemsSold}',
-                        color: AppColors.gold,
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-
-          // --- Best Sellers (Owner/Admin only) ---
-          if (widget.showSalesFigures)
-            SectionPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Best Sellers', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
-                      DropdownButton<_BestSellerPeriod>(
-                        value: _bestSellerPeriod,
-                        underline: const SizedBox.shrink(),
-                        items: const [
-                          DropdownMenuItem(value: _BestSellerPeriod.daily, child: Text('Today')),
-                          DropdownMenuItem(value: _BestSellerPeriod.weekly, child: Text('This Week')),
-                          DropdownMenuItem(value: _BestSellerPeriod.monthly, child: Text('This Month')),
-                        ],
-                        onChanged: (v) => setState(() => _bestSellerPeriod = v!),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (_loadingProducts)
-                    const Center(child: CircularProgressIndicator())
-                  else
-                    Builder(builder: (context) {
-                      final ranked = _products.where((p) => _soldForBestSeller(p) > 0).toList()
-                        ..sort((a, b) => _soldForBestSeller(b).compareTo(_soldForBestSeller(a)));
-                      final top = ranked.take(5).toList();
-                      if (top.isEmpty) {
-                        return const Text('No sales recorded for this period yet.');
-                      }
-                      return RankedBarChart(
-                        entries: top.map((p) => MapEntry(p.name, _soldForBestSeller(p))).toList(),
-                      );
-                    }),
-                ],
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: SectionPanel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Ingredient Usage — ${_periodLabel(_period)}', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+            const SizedBox(height: 8),
+            if (_loadingAggregate) const Center(child: CircularProgressIndicator()),
+            if (!_loadingAggregate && (_usageSummary == null || _usageSummary!.isEmpty))
+              const Text('No ingredient usage recorded for this period.'),
+            if (!_loadingAggregate && _usageSummary != null && _usageSummary!.isNotEmpty) ...[
+              PaginationBar(
+                pageSize: _usagePageSize,
+                currentPage: _usagePage,
+                totalItems: usageEntries.length,
+                onPageSizeChanged: (size) => setState(() {
+                  _usagePageSize = size;
+                  _usagePage = 0;
+                }),
+                onPageChanged: (page) => setState(() => _usagePage = page),
               ),
-            ),
-
-          // --- Per-product sales breakdown (Owner/Admin only) ---
-          if (widget.showSalesFigures)
-            SectionPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Product Sales', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
-                  const Text(
-                    'Daily / weekly / monthly units sold, per product — always shown together, regardless of the period picked above.',
-                    style: TextStyle(fontSize: 12, color: AppColors.brown),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _productSearchController,
-                          onChanged: (v) => setState(() {
-                            _productSearchQuery = v;
-                            _productPage = 0;
-                          }),
-                          decoration: InputDecoration(
-                            hintText: 'Search products...',
-                            prefixIcon: const Icon(Icons.search, color: AppColors.rust),
-                            isDense: true,
-                            suffixIcon: _productSearchQuery.isEmpty
-                                ? null
-                                : IconButton(
-                                    icon: const Icon(Icons.clear, size: 20),
-                                    onPressed: () => setState(() {
-                                      _productSearchController.clear();
-                                      _productSearchQuery = '';
-                                      _productPage = 0;
-                                    }),
-                                  ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      PopupMenuButton<_ProductSortOption>(
-                        icon: const Icon(Icons.swap_vert, color: AppColors.rust),
-                        tooltip: 'Sort products',
-                        initialValue: _productSort,
-                        onSelected: (option) => setState(() {
-                          _productSort = option;
-                          _productPage = 0;
-                        }),
-                        itemBuilder: (context) => _ProductSortOption.values
-                            .map((option) => PopupMenuItem(
-                                  value: option,
-                                  child: Row(
-                                    children: [
-                                      Text(option.label),
-                                      if (option == _productSort) ...[
-                                        const Spacer(),
-                                        const Icon(Icons.check, size: 18, color: AppColors.rust),
-                                      ],
-                                    ],
-                                  ),
-                                ))
-                            .toList(),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.refresh, color: AppColors.rust),
-                        tooltip: 'Refresh',
-                        onPressed: _loadProductBreakdown,
-                      ),
-                    ],
-                  ),
-                  if (!_loadingProducts && filteredProducts.isNotEmpty)
-                    PaginationBar(
-                      pageSize: _productPageSize,
-                      currentPage: _productPage,
-                      totalItems: filteredProducts.length,
-                      onPageSizeChanged: (size) => setState(() {
-                        _productPageSize = size;
-                        _productPage = 0;
-                      }),
-                      onPageChanged: (page) => setState(() => _productPage = page),
-                    ),
-                  const SizedBox(height: 8),
-                  if (_loadingProducts) const Center(child: CircularProgressIndicator()),
-                  if (!_loadingProducts && _products.isEmpty) const Text('No products yet.'),
-                  if (!_loadingProducts && _products.isNotEmpty && filteredProducts.isEmpty)
-                    Text('No products match "$_productSearchQuery".'),
-                  if (!_loadingProducts)
-                    LayoutBuilder(
-                      builder: (context, constraints) {
-                        final columns = gridColumnsForWidth(constraints.maxWidth);
-                        final cardWidth = wrapCardWidth(constraints.maxWidth, columns);
-                        return Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: productPageItems.map((p) {
-                            final stat = _productBreakdown[p.id] ?? ProductSalesStat.zero;
-                            return SizedBox(
-                              width: cardWidth,
-                              child: InfoListCard(
-                                leadingIcon: Icons.shopping_bag_outlined,
-                                accentColor: AppColors.rust,
-                                title: p.name,
-                                idText: 'ID: ${p.id}',
-                                pills: [
-                                  StatPill(label: '₱${p.price.toStringAsFixed(2)}', color: AppColors.rust),
-                                ],
-                                extra: MultiPeriodBarChart(
-                                  values: [
-                                    MapEntry('Today', stat.dailySold),
-                                    MapEntry('Week', stat.weeklySold),
-                                    MapEntry('Month', stat.monthlySold),
-                                  ],
-                                ),
-                                footerText: stat.lastSoldDate == null
-                                    ? 'Not sold yet'
-                                    : 'Last sold: ${_dateFormat.format(stat.lastSoldDate!)}',
-                              ),
-                            );
-                          }).toList(),
-                        );
-                      },
-                    ),
-                ],
+              const SizedBox(height: 4),
+              // Resolving ingredient names via a live stream (rather than a
+              // one-off fetch) so a newly-added ingredient's name shows up
+              // immediately instead of needing a manual refresh.
+              StreamBuilder<List<Ingredient>>(
+                stream: _ingredientService.watchIngredients(),
+                builder: (context, snapshot) {
+                  final ingredientNames = {
+                    for (final i in snapshot.data ?? const <Ingredient>[]) i.id: i.name,
+                  };
+                  return Column(
+                    children: usagePageItems.map((e) => InfoListCard(
+                          leadingIcon: Icons.kitchen,
+                          accentColor: AppColors.teal,
+                          title: ingredientNames[e.key] ?? e.key,
+                          idText: 'ID: ${e.key}',
+                          pills: [
+                            StatPill(label: 'Used: ${e.value}', color: AppColors.rust),
+                          ],
+                        )).toList(),
+                  );
+                },
               ),
-            ),
-
-          // --- Ingredient usage summary ---
-          SectionPanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Ingredient Usage Summary', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
-                const SizedBox(height: 8),
-                if (_loadingAggregate) const Center(child: CircularProgressIndicator()),
-                if (!_loadingAggregate && (_usageSummary == null || _usageSummary!.isEmpty))
-                  const Text('No ingredient usage recorded for this period.'),
-                if (!_loadingAggregate && _usageSummary != null && _usageSummary!.isNotEmpty) ...[
-                  PaginationBar(
-                    pageSize: _usagePageSize,
-                    currentPage: _usagePage,
-                    totalItems: usageEntries.length,
-                    onPageSizeChanged: (size) => setState(() {
-                      _usagePageSize = size;
-                      _usagePage = 0;
-                    }),
-                    onPageChanged: (page) => setState(() => _usagePage = page),
-                  ),
-                  const SizedBox(height: 4),
-                  // Resolving ingredient names via a live stream (rather than
-                  // a one-off fetch) so a newly-added ingredient's name
-                  // shows up immediately instead of needing a manual refresh.
-                  StreamBuilder<List<Ingredient>>(
-                    stream: _ingredientService.watchIngredients(),
-                    builder: (context, snapshot) {
-                      final ingredientNames = {
-                        for (final i in snapshot.data ?? const <Ingredient>[]) i.id: i.name,
-                      };
-                      return Column(
-                        children: usagePageItems.map((e) => InfoListCard(
-                              leadingIcon: Icons.kitchen,
-                              accentColor: AppColors.teal,
-                              title: ingredientNames[e.key] ?? e.key,
-                              idText: 'ID: ${e.key}',
-                              pills: [
-                                StatPill(label: 'Used: ${e.value}', color: AppColors.rust),
-                              ],
-                            )).toList(),
-                      );
-                    },
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
+            ],
+          ],
+        ),
       ),
     );
   }
 }
 
 /// A visually prominent stat tile for the aggregate totals — bigger and
-/// color-coded, instead of plain text rows, per testing feedback that the
-/// totals should stand out more.
+/// color-coded, instead of plain text rows.
 class _StatHighlight extends StatelessWidget {
   final String label;
   final String value;

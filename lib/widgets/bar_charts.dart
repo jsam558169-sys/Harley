@@ -110,74 +110,55 @@ class RankedBarChart extends StatelessWidget {
   }
 }
 
-/// Small 3-bar chart (Today / This Week / This Month) embedded inside a
-/// product card, replacing plain text pills with an actual chart.
-class MultiPeriodBarChart extends StatelessWidget {
-  final List<MapEntry<String, num>> values; // label -> value, e.g. [('Today', 5), ('Week', 20), ('Month', 80)]
+/// A single compact bar chart showing one value relative to [maxValue] —
+/// used per-row in the Product Sales list, so each product shows a real
+/// (small) chart for whichever period is currently selected, rather than
+/// always showing all three periods regardless of what's picked up top.
+class SingleValueBarChart extends StatelessWidget {
+  final num value;
+  final num maxValue; // the largest value among the currently visible rows, so bars are comparable
   final Color color;
 
-  const MultiPeriodBarChart({super.key, required this.values, this.color = AppColors.teal});
+  const SingleValueBarChart({super.key, required this.value, required this.maxValue, this.color = AppColors.teal});
 
   @override
   Widget build(BuildContext context) {
-    final maxVal = values.map((e) => e.value).fold<num>(0, (a, b) => a > b ? a : b).toDouble();
-
     return SizedBox(
-      height: 90,
-      width: values.length * 56,
+      width: 56,
+      height: 44,
       child: BarChart(
         BarChartData(
-          alignment: BarChartAlignment.spaceAround,
-          maxY: maxVal <= 0 ? 1 : maxVal * 1.3,
-          titlesData: FlTitlesData(
-            show: true,
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                getTitlesWidget: (value, meta) {
-                  final i = value.toInt();
-                  if (i < 0 || i >= values.length) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(values[i].key, style: TextStyle(fontSize: 10, color: AppColors.brown.withValues(alpha: 0.6))),
-                  );
-                },
-              ),
-            ),
-          ),
+          alignment: BarChartAlignment.center,
+          maxY: maxValue <= 0 ? 1 : maxValue.toDouble() * 1.3,
+          titlesData: const FlTitlesData(show: false),
           borderData: FlBorderData(show: false),
           gridData: const FlGridData(show: false),
-          barGroups: List.generate(values.length, (i) {
-            return BarChartGroupData(
-              x: i,
-              showingTooltipIndicators: [0],
-              barRods: [
-                BarChartRodData(
-                  toY: values[i].value.toDouble(),
-                  color: color,
-                  width: 20,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ],
-            );
-          }),
           barTouchData: BarTouchData(
             enabled: false,
             touchTooltipData: BarTouchTooltipData(
               getTooltipColor: (_) => Colors.transparent,
               tooltipPadding: EdgeInsets.zero,
               tooltipMargin: 2,
-              getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                return BarTooltipItem(
-                  rod.toY.toInt().toString(),
-                  const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.brown),
-                );
-              },
+              getTooltipItem: (group, groupIndex, rod, rodIndex) => BarTooltipItem(
+                rod.toY.toInt().toString(),
+                const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.brown),
+              ),
             ),
           ),
+          barGroups: [
+            BarChartGroupData(
+              x: 0,
+              showingTooltipIndicators: [0],
+              barRods: [
+                BarChartRodData(
+                  toY: value.toDouble(),
+                  color: color,
+                  width: 24,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
