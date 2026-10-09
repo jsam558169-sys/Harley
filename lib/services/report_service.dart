@@ -3,6 +3,8 @@ import '../models/sales_report.dart';
 import '../models/ingredient_usage.dart';
 import 'collections.dart';
 import 'sales_service.dart';
+import 'product_service.dart';
+import 'ingredient_service.dart';
 
 /// Generates the daily/weekly/monthly sales and ingredient-usage reports
 /// described in the system objectives. Reports are computed on demand from
@@ -11,6 +13,8 @@ import 'sales_service.dart';
 class ReportService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final SalesService _salesService = SalesService();
+  final ProductService _productService = ProductService();
+  final IngredientService _ingredientService = IngredientService();
 
   CollectionReference<Map<String, dynamic>> get _reportCol =>
       _db.collection(Collections.salesReport);
@@ -75,6 +79,45 @@ class ReportService {
   Future<String> cacheReport(SalesReport report) async {
     final ref = await _reportCol.add(report.toMap());
     return ref.id;
+  }
+
+  /// Gross revenue, cost of goods sold, and net profit for the given
+  /// period. Cost is computed from each sold product's recipe using
+  /// CURRENT ingredient costPerUnit values — not a historical snapshot of
+  /// what ingredients cost at the time of each sale. If ingredient costs
+  /// have changed since a sale happened, that sale's contribution to past
+  /// periods' cost/profit will shift to reflect today's costs rather than
+  /// the true cost on that day. Ingredients with costPerUnit still at the
+  /// default of 0 (never filled in) will understate cost.
+  Future<ProfitSummary> generateProfitSummary({
+    required DateTime start,
+    required DateTime end,
+  }) async {
+    final transactions = await _salesService.getTransactionsBetween(start, end);
+    final products = await _productService.getAllProducts();
+    final ingredients = await _ingredientService.getAllIngredients();
+    final productsById = {for (final p in products) p.id: p};
+    final ingredientsById = {for (final i in ingredients) i.id: i};
+
+    double revenue = 0;
+    double cost = 0;
+
+    for (final t in transactions) {
+      for (final item in t.items) {
+        revenue += item.lineTotal;
+        final product = productsById[item.productId];
+        if (product == null) continue;
+        num unitCost = 0;
+        for (final r in product.recipeIngredients) {
+          final ingredient = ingredientsById[r.ingredientId];
+          if (ingredient == null) continue;
+          unitCost += ingredient.costPerUnit * r.qtyPerUnit;
+        }
+        cost += unitCost * item.qty;
+      }
+    }
+
+    return ProfitSummary(totalRevenue: revenue, totalCost: cost, netProfit: revenue - cost);
   }
 
   /// Ingredient usage summary for a period: ingredientId -> total qty used.
@@ -167,4 +210,22 @@ class ProductSalesStat {
   });
 
   static const zero = ProductSalesStat(dailySold: 0, weeklySold: 0, monthlySold: 0);
+}
+
+/// Gross revenue, total cost of goods sold, and net profit for a period.
+/// Not a Firestore model — computed on demand by
+/// [ReportService.generateProfitSummary]. See that method's doc comment
+/// for an important caveat about cost accuracy over time.
+class ProfitSummary {
+  final double totalRevenue;
+  final double totalCost;
+  final double netProfit;
+
+  const ProfitSummary({
+    required this.totalRevenue,
+    required this.totalCost,
+    required this.netProfit,
+  });
+
+  static const zero = ProfitSummary(totalRevenue: 0, totalCost: 0, netProfit: 0);
 }

@@ -104,6 +104,7 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
     final nameController = TextEditingController(text: existing?.name ?? '');
     final qtyController = TextEditingController();
     final customUnitController = TextEditingController();
+    final costController = TextEditingController(text: existing != null ? existing.costPerUnit.toString() : '');
     MeasurementUnit unit = MeasurementUnit.piece;
     bool isSaving = false;
 
@@ -161,6 +162,16 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
                   decoration: const InputDecoration(labelText: 'Custom unit label (e.g. "sachet")'),
                 ),
               ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: costController,
+                decoration: InputDecoration(
+                  labelText: 'Cost per ${unit == MeasurementUnit.custom && customUnitController.text.isNotEmpty ? customUnitController.text : unit.shortLabel} (₱)',
+                  helperText: 'What this costs you — used to calculate profit on Reports. Optional, defaults to ₱0.',
+                  helperMaxLines: 2,
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
               if (isEditing) ...[
                 const SizedBox(height: 12),
                 Text(
@@ -206,6 +217,18 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
                           );
                           return;
                         }
+                      }
+
+                      final costText = costController.text.trim();
+                      final costPerUnit = costText.isEmpty ? 0 : num.tryParse(costText);
+                      if (costPerUnit == null || costPerUnit < 0 || costPerUnit > maxInputValue) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(
+                            content: Text('Enter a cost between 0 and $maxInputValue, or leave it blank.'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                        return;
                       }
 
                       // If editing and the unit is changing, work out whether
@@ -278,6 +301,7 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
                             freshQty: newFreshQty,
                             expiredQty: newExpiredQty,
                             unit: unitLabel,
+                            costPerUnit: costPerUnit,
                           ));
 
                           // Auto-convert this ingredient's recipe lines in
@@ -315,6 +339,7 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
                             freshQty: 0,
                             expiredQty: 0,
                             unit: unitLabel,
+                            costPerUnit: costPerUnit,
                           ));
                           if (initialQty > 0) {
                             await _inventoryService.recordStockMovement(
@@ -630,6 +655,11 @@ class _IngredientsScreenState extends State<IngredientsScreen> {
                                         label: 'Expired: ${ing.expiredQty} ${ing.unit}',
                                         color: ing.hasExpiredStock ? AppColors.stopRed : AppColors.cardBorder,
                                         muted: !ing.hasExpiredStock,
+                                      ),
+                                      StatPill(
+                                        label: '₱${ing.costPerUnit.toStringAsFixed(2)} / ${ing.unit}',
+                                        color: AppColors.gold,
+                                        muted: ing.costPerUnit == 0,
                                       ),
                                     ],
                                     extra: Wrap(

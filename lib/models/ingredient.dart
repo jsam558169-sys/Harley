@@ -9,12 +9,20 @@ class Ingredient {
   final num expiredQty; // stock moved out of usable inventory via "mark expired"
   final String unit; // e.g. "piece", "kg", "bottle", or a custom label
 
+  /// What this ingredient costs the business per 1 unit of [unit] (e.g.
+  /// ₱50 per kg). Used to compute recipe cost and therefore profit on
+  /// Reports — not a selling price, that's on Product. Defaults to 0 for
+  /// ingredients added before this field existed, which means profit
+  /// figures will understate cost until an Owner/Admin fills these in.
+  final num costPerUnit;
+
   Ingredient({
     required this.id,
     required this.name,
     required this.freshQty,
     required this.expiredQty,
     this.unit = 'piece',
+    this.costPerUnit = 0,
   });
 
   num get totalQty => freshQty + expiredQty;
@@ -25,6 +33,7 @@ class Ingredient {
         'freshQty': freshQty,
         'expiredQty': expiredQty,
         'unit': unit,
+        'costPerUnit': costPerUnit,
       };
 
   factory Ingredient.fromMap(String id, Map<String, dynamic> map) {
@@ -40,14 +49,16 @@ class Ingredient {
       freshQty: freshQty,
       expiredQty: (map['expiredQty'] ?? 0) as num,
       unit: map['unit'] ?? 'piece',
+      costPerUnit: (map['costPerUnit'] ?? 0) as num,
     );
   }
 
-  Ingredient copyWith({num? freshQty, num? expiredQty, String? unit}) => Ingredient(
+  Ingredient copyWith({num? freshQty, num? expiredQty, String? unit, num? costPerUnit}) => Ingredient(
         id: id,
         name: name,
         freshQty: freshQty ?? this.freshQty,
         expiredQty: expiredQty ?? this.expiredQty,
         unit: unit ?? this.unit,
+        costPerUnit: costPerUnit ?? this.costPerUnit,
       );
 }

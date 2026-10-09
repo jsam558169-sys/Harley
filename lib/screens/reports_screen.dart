@@ -118,10 +118,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   // Aggregate report (period-based).
   SalesReport? _report;
+  ProfitSummary? _profitSummary;
   Map<String, num>? _usageSummary;
   bool _loadingAggregate = false;
   int _usagePageSize = defaultPageSizeOptions.first;
   int _usagePage = 0;
+  String _usageSearchQuery = '';
+  final _usageSearchController = TextEditingController();
 
   // Per-product breakdown — loaded once with daily/weekly/monthly all
   // together; which one is actually shown is picked at render time based
@@ -172,11 +175,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final now = DateTime.now();
     final start = _periodStart(_period);
     final usage = await _reportService.generateIngredientUsageSummary(start: start, end: now);
+    final profit = widget.showSalesFigures
+        ? await _reportService.generateProfitSummary(start: start, end: now)
+        : ProfitSummary.zero;
 
     if (!mounted) return;
     setState(() {
       _report = report;
       _usageSummary = usage;
+      _profitSummary = profit;
       _loadingAggregate = false;
     });
   }
@@ -276,19 +283,102 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return result;
   }
 
-  Widget _choiceChip({
-    required String label,
-    required bool selected,
-    required VoidCallback onSelected,
-    Color color = AppColors.rust,
-  }) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onSelected(),
-      selectedColor: color.withValues(alpha: 0.2),
-      labelStyle: TextStyle(color: selected ? color : AppColors.brown, fontWeight: FontWeight.w700),
-      side: BorderSide(color: selected ? color : AppColors.cardBorder),
+  static const Map<_ReportView, IconData> _viewIcons = {
+    _ReportView.salesSummary: Icons.summarize,
+    _ReportView.bestSellers: Icons.emoji_events,
+    _ReportView.productSales: Icons.shopping_bag,
+    _ReportView.losses: Icons.remove_shopping_cart,
+    _ReportView.ingredientUsage: Icons.kitchen,
+  };
+
+  /// Pill-style segmented control for Daily/Weekly/Monthly — every graph
+  /// on this screen reacts to this one control.
+  Widget _buildPeriodSelector() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.cream,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      child: Row(
+        children: ReportPeriod.values.map((p) {
+          final selected = _period == p;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () {
+                setState(() => _period = p);
+                _generateAggregate();
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: selected ? AppColors.rust : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _periodLabel(p),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    color: selected ? AppColors.white : AppColors.brown,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  /// Horizontally-scrollable row of larger, icon-labeled tabs for choosing
+  /// which single report view is shown below — roomier than a wrapped row
+  /// of small chips, and scrolls instead of cramming/wrapping awkwardly.
+  Widget _buildViewTabs() {
+    return SizedBox(
+      height: 68,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: _availableViews.entries.map((e) {
+          final selected = _view == e.key;
+          return Padding(
+            padding: const EdgeInsets.only(right: 10),
+            child: InkWell(
+              onTap: () => setState(() => _view = e.key),
+              borderRadius: BorderRadius.circular(14),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: selected ? AppColors.teal.withValues(alpha: 0.15) : AppColors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: selected ? AppColors.teal : AppColors.cardBorder, width: selected ? 1.5 : 1),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(_viewIcons[e.key], size: 19, color: selected ? AppColors.teal : AppColors.brown.withValues(alpha: 0.6)),
+                    const SizedBox(width: 8),
+                    Text(
+                      e.value,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        color: selected ? AppColors.teal : AppColors.brown,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 
@@ -298,46 +388,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
       appBar: AppBar(title: const Text('Reports')),
       body: Column(
         children: [
-          // Global period selector — every graph below reacts to this.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Wrap(
-                spacing: 8,
-                children: ReportPeriod.values.map((p) {
-                  return _choiceChip(
-                    label: _periodLabel(p),
-                    selected: _period == p,
-                    color: AppColors.rust,
-                    onSelected: () {
-                      setState(() => _period = p);
-                      _generateAggregate();
-                    },
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
-          // Report-type picker — shows one section at a time.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _availableViews.entries.map((e) {
-                  return _choiceChip(
-                    label: e.value,
-                    selected: _view == e.key,
-                    color: AppColors.teal,
-                    onSelected: () => setState(() => _view = e.key),
-                  );
-                }).toList(),
-              ),
-            ),
-          ),
+          _buildPeriodSelector(),
+          _buildViewTabs(),
+          const SizedBox(height: 8),
           const Divider(height: 1),
           Expanded(child: _buildSelectedView()),
         ],
@@ -361,6 +414,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildSalesSummaryView() {
+    final profit = _profitSummary ?? ProfitSummary.zero;
+    final profitColor = profit.netProfit >= 0 ? AppColors.teal : AppColors.stopRed;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: SectionPanel(
@@ -370,16 +426,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
             Text('${_periodLabel(_period)} Sales Summary', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
             const SizedBox(height: 12),
             if (_loadingAggregate) const Center(child: CircularProgressIndicator()),
-            if (!_loadingAggregate && _report != null)
+            if (!_loadingAggregate && _report != null) ...[
               Wrap(
                 spacing: 10,
                 runSpacing: 10,
                 children: [
                   if (widget.showSalesFigures) ...[
                     _StatHighlight(
-                      label: 'Total Sales',
+                      label: 'Gross Sales',
                       value: '₱${_report!.totalSales.toStringAsFixed(2)}',
                       color: AppColors.rust,
+                    ),
+                    _StatHighlight(
+                      label: 'Total Cost',
+                      value: '₱${profit.totalCost.toStringAsFixed(2)}',
+                      color: AppColors.gold,
+                    ),
+                    _StatHighlight(
+                      label: 'Net Profit',
+                      value: '₱${profit.netProfit.toStringAsFixed(2)}',
+                      color: profitColor,
                     ),
                     _StatHighlight(
                       label: 'Total Transactions',
@@ -390,10 +456,33 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   _StatHighlight(
                     label: 'Total Items Sold',
                     value: '${_report!.totalItemsSold}',
-                    color: AppColors.gold,
+                    color: AppColors.brown,
                   ),
                 ],
               ),
+              if (widget.showSalesFigures) ...[
+                const SizedBox(height: 20),
+                Text(
+                  'Gross vs. Cost vs. Profit',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.brown.withValues(alpha: 0.8)),
+                ),
+                const SizedBox(height: 8),
+                ComparisonBarChart(
+                  entries: [
+                    MapEntry('Gross', _report!.totalSales),
+                    MapEntry('Cost', profit.totalCost),
+                    MapEntry('Net Profit', profit.netProfit),
+                  ],
+                  colors: [AppColors.rust, AppColors.gold, profitColor],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Cost uses each ingredient\'s current cost-per-unit (set on Ingredients & Stock) applied to what was sold — '
+                  'it isn\'t a snapshot of what ingredients cost on the day of each sale. Ingredients with no cost entered count as ₱0.',
+                  style: TextStyle(fontSize: 11, color: AppColors.brown.withValues(alpha: 0.6)),
+                ),
+              ],
+            ],
           ],
         ),
       ),
@@ -696,42 +785,76 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   Widget _buildIngredientUsageView() {
-    final usageEntries = _usageSummary?.entries.toList() ?? [];
-    final usagePageItems = paginate(usageEntries, _usagePage, _usagePageSize);
+    final allUsageEntries = _usageSummary?.entries.toList() ?? [];
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: SectionPanel(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Ingredient Usage — ${_periodLabel(_period)}', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
-            const SizedBox(height: 8),
-            if (_loadingAggregate) const Center(child: CircularProgressIndicator()),
-            if (!_loadingAggregate && (_usageSummary == null || _usageSummary!.isEmpty))
-              const Text('No ingredient usage recorded for this period.'),
-            if (!_loadingAggregate && _usageSummary != null && _usageSummary!.isNotEmpty) ...[
-              PaginationBar(
-                pageSize: _usagePageSize,
-                currentPage: _usagePage,
-                totalItems: usageEntries.length,
-                onPageSizeChanged: (size) => setState(() {
-                  _usagePageSize = size;
-                  _usagePage = 0;
-                }),
-                onPageChanged: (page) => setState(() => _usagePage = page),
-              ),
-              const SizedBox(height: 4),
-              // Resolving ingredient names via a live stream (rather than a
-              // one-off fetch) so a newly-added ingredient's name shows up
-              // immediately instead of needing a manual refresh.
-              StreamBuilder<List<Ingredient>>(
-                stream: _ingredientService.watchIngredients(),
-                builder: (context, snapshot) {
-                  final ingredientNames = {
-                    for (final i in snapshot.data ?? const <Ingredient>[]) i.id: i.name,
-                  };
-                  return Column(
+    // Resolving ingredient names via a live stream (rather than a one-off
+    // fetch) so a newly-added ingredient's name shows up immediately
+    // instead of needing a manual refresh — and so search can match on the
+    // real name, not just the raw ID.
+    return StreamBuilder<List<Ingredient>>(
+      stream: _ingredientService.watchIngredients(),
+      builder: (context, snapshot) {
+        final ingredientNames = {
+          for (final i in snapshot.data ?? const <Ingredient>[]) i.id: i.name,
+        };
+
+        final q = _usageSearchQuery.trim().toLowerCase();
+        final usageEntries = allUsageEntries.where((e) {
+          if (q.isEmpty) return true;
+          final name = (ingredientNames[e.key] ?? e.key).toLowerCase();
+          return name.contains(q) || e.key.toLowerCase().contains(q);
+        }).toList();
+        final usagePageItems = paginate(usageEntries, _usagePage, _usagePageSize);
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: SectionPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Ingredient Usage — ${_periodLabel(_period)}', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _usageSearchController,
+                  onChanged: (v) => setState(() {
+                    _usageSearchQuery = v;
+                    _usagePage = 0;
+                  }),
+                  decoration: InputDecoration(
+                    hintText: 'Search by ingredient name or ID...',
+                    prefixIcon: const Icon(Icons.search, color: AppColors.rust),
+                    isDense: true,
+                    suffixIcon: _usageSearchQuery.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.clear, size: 20),
+                            onPressed: () => setState(() {
+                              _usageSearchController.clear();
+                              _usageSearchQuery = '';
+                              _usagePage = 0;
+                            }),
+                          ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (_loadingAggregate) const Center(child: CircularProgressIndicator()),
+                if (!_loadingAggregate && allUsageEntries.isEmpty)
+                  const Text('No ingredient usage recorded for this period.'),
+                if (!_loadingAggregate && allUsageEntries.isNotEmpty && usageEntries.isEmpty)
+                  Text('No ingredients match "$_usageSearchQuery".'),
+                if (!_loadingAggregate && usageEntries.isNotEmpty) ...[
+                  PaginationBar(
+                    pageSize: _usagePageSize,
+                    currentPage: _usagePage,
+                    totalItems: usageEntries.length,
+                    onPageSizeChanged: (size) => setState(() {
+                      _usagePageSize = size;
+                      _usagePage = 0;
+                    }),
+                    onPageChanged: (page) => setState(() => _usagePage = page),
+                  ),
+                  const SizedBox(height: 4),
+                  Column(
                     children: usagePageItems.map((e) => InfoListCard(
                           leadingIcon: Icons.kitchen,
                           accentColor: AppColors.teal,
@@ -741,13 +864,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             StatPill(label: 'Used: ${e.value}', color: AppColors.rust),
                           ],
                         )).toList(),
-                  );
-                },
-              ),
-            ],
-          ],
-        ),
-      ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
