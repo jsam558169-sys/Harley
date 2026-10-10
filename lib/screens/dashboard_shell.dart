@@ -52,18 +52,48 @@ class DashboardShell extends StatefulWidget {
 
 class _DashboardShellState extends State<DashboardShell> {
   final _reportService = ReportService();
-  late Future<SalesReport> _todayFuture;
+  SalesReport? _today;
+  bool _loadingToday = true;
+  DateTime? _lastUpdated;
 
   @override
   void initState() {
     super.initState();
-    _todayFuture = _loadToday();
+    _fetchToday();
   }
 
-  Future<SalesReport> _loadToday() =>
-      _reportService.generateSalesReport(period: ReportPeriod.daily);
+  /// Reloads today's numbers. The previous numbers stay on screen while
+  /// loading (no flashing back to "…"), the app-bar button shows a spinner,
+  /// and a manual refresh confirms with a snackbar.
+  void _refresh({bool manual = false}) {
+    setState(() => _loadingToday = true);
+    _fetchToday(manual: manual);
+  }
 
-  void _refresh() => setState(() => _todayFuture = _loadToday());
+  Future<void> _fetchToday({bool manual = false}) async {
+    try {
+      final report = await _reportService.generateSalesReport(period: ReportPeriod.daily);
+      if (!mounted) return;
+      setState(() {
+        _today = report;
+        _lastUpdated = DateTime.now();
+        _loadingToday = false;
+      });
+      if (manual) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Dashboard updated'), duration: Duration(seconds: 1)),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingToday = false);
+      if (manual) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Couldn\'t refresh. Check your connection and try again.')),
+        );
+      }
+    }
+  }
 
   Future<void> _logout() async {
     final confirmed = await confirmAction(
@@ -84,6 +114,7 @@ class _DashboardShellState extends State<DashboardShell> {
     await Navigator.of(context).push(MaterialPageRoute(builder: item.builder));
     // Coming back from POS etc. — refresh today's numbers.
     if (mounted) _refresh();
+    // (silent: no snackbar, only a manual tap on the refresh icon shows one)
   }
 
   @override
@@ -97,9 +128,15 @@ class _DashboardShellState extends State<DashboardShell> {
         title: const Text('Dashboard'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
+            icon: _loadingToday
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  )
+                : const Icon(Icons.refresh),
             tooltip: 'Refresh',
-            onPressed: _refresh,
+            onPressed: _loadingToday ? null : () => _refresh(manual: true),
           ),
           IconButton(
             icon: const Icon(Icons.logout),
@@ -124,7 +161,16 @@ class _DashboardShellState extends State<DashboardShell> {
                     trailing: _RolePill(label: widget.roleLabel),
                   ),
                   const SizedBox(height: 22),
-                  const _SectionHeading(title: 'Today'),
+                  Row(
+                    children: [
+                      const Expanded(child: _SectionHeading(title: 'Today')),
+                      if (_lastUpdated != null)
+                        Text(
+                          'Updated ${DateFormat('h:mm a').format(_lastUpdated!)}',
+                          style: TextStyle(fontSize: 12, color: AppColors.brown.withValues(alpha: 0.55)),
+                        ),
+                    ],
+                  ),
                   const SizedBox(height: 10),
                   _buildStats(),
                   const SizedBox(height: 26),
@@ -141,15 +187,12 @@ class _DashboardShellState extends State<DashboardShell> {
   }
 
   Widget _buildStats() {
-    return FutureBuilder<SalesReport>(
-      future: _todayFuture,
-      builder: (context, snapshot) {
-        final loading = snapshot.connectionState != ConnectionState.done;
-        final report = snapshot.data;
+    return Builder(
+      builder: (context) {
+        final report = _today;
         String value(String Function(SalesReport r) f) {
-          if (loading) return '…';
-          if (report == null) return '—';
-          return f(report);
+          if (report != null) return f(report);
+          return _loadingToday ? '…' : '—';
         }
 
         final money = NumberFormat('#,##0.00');

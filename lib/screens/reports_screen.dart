@@ -17,12 +17,27 @@ import '../widgets/info_list_card.dart';
 import '../widgets/bar_charts.dart';
 import '../widgets/pagination_bar.dart';
 import '../widgets/section_panel.dart';
+import '../widgets/transactions_report_view.dart';
 
-enum _ProductSortOption { nameAsc, nameDesc, lastSoldNewest, lastSoldOldest, soldHigh, soldLow }
+enum _ProductSortOption {
+  nameAsc,
+  nameDesc,
+  lastSoldNewest,
+  lastSoldOldest,
+  soldHigh,
+  soldLow
+}
 
 enum _LossSortOption { dateNewest, dateOldest, nameAsc, nameDesc }
 
-enum _ReportView { salesSummary, bestSellers, productSales, losses, ingredientUsage }
+enum _ReportView {
+  salesSummary,
+  bestSellers,
+  productSales,
+  transactions,
+  losses,
+  ingredientUsage
+}
 
 extension on _LossSortOption {
   String get label {
@@ -158,7 +173,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
       case ReportPeriod.daily:
         return DateTime(now.year, now.month, now.day);
       case ReportPeriod.weekly:
-        return now.subtract(Duration(days: now.weekday - 1));
+        final monday = now.subtract(Duration(days: now.weekday - 1));
+        return DateTime(monday.year, monday.month, monday.day);
       case ReportPeriod.monthly:
         return DateTime(now.year, now.month, 1);
     }
@@ -174,7 +190,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     final now = DateTime.now();
     final start = _periodStart(_period);
-    final usage = await _reportService.generateIngredientUsageSummary(start: start, end: now);
+    final usage = await _reportService.generateIngredientUsageSummary(
+        start: start, end: now);
     final profit = widget.showSalesFigures
         ? await _reportService.generateProfitSummary(start: start, end: now)
         : ProfitSummary.zero;
@@ -216,20 +233,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<Product> _filterSortProducts() {
     var result = _products.where((p) {
       if (_productSearchQuery.trim().isEmpty) return true;
-      return p.name.toLowerCase().contains(_productSearchQuery.trim().toLowerCase());
+      return p.name
+          .toLowerCase()
+          .contains(_productSearchQuery.trim().toLowerCase());
     }).toList();
 
     // Products never sold have no lastSoldDate — treated as the oldest
     // possible date so they sort predictably to one end.
     DateTime lastSold(Product p) =>
-        _productBreakdown[p.id]?.lastSoldDate ?? DateTime.fromMillisecondsSinceEpoch(0);
+        _productBreakdown[p.id]?.lastSoldDate ??
+        DateTime.fromMillisecondsSinceEpoch(0);
 
     switch (_productSort) {
       case _ProductSortOption.nameAsc:
-        result.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        result.sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
         break;
       case _ProductSortOption.nameDesc:
-        result.sort((a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
+        result.sort(
+            (a, b) => b.name.toLowerCase().compareTo(a.name.toLowerCase()));
         break;
       case _ProductSortOption.lastSoldNewest:
         result.sort((a, b) => lastSold(b).compareTo(lastSold(a)));
@@ -238,10 +260,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
         result.sort((a, b) => lastSold(a).compareTo(lastSold(b)));
         break;
       case _ProductSortOption.soldHigh:
-        result.sort((a, b) => _soldForPeriod(b, _period).compareTo(_soldForPeriod(a, _period)));
+        result.sort((a, b) =>
+            _soldForPeriod(b, _period).compareTo(_soldForPeriod(a, _period)));
         break;
       case _ProductSortOption.soldLow:
-        result.sort((a, b) => _soldForPeriod(a, _period).compareTo(_soldForPeriod(b, _period)));
+        result.sort((a, b) =>
+            _soldForPeriod(a, _period).compareTo(_soldForPeriod(b, _period)));
         break;
     }
     return result;
@@ -251,11 +275,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _ReportView.salesSummary: 'Sales Summary',
         if (widget.showSalesFigures) _ReportView.bestSellers: 'Best Sellers',
         if (widget.showSalesFigures) _ReportView.productSales: 'Product Sales',
+        if (widget.showSalesFigures) _ReportView.transactions: 'Transactions',
         if (widget.showSalesFigures) _ReportView.losses: 'Losses',
         _ReportView.ingredientUsage: 'Ingredient Usage',
       };
 
-  List<LossEntry> _filterSortLosses(List<LossEntry> entries, Map<String, String> nameMap) {
+  List<LossEntry> _filterSortLosses(
+      List<LossEntry> entries, Map<String, String> nameMap) {
     String nameOf(LossEntry e) => nameMap[e.itemId] ?? e.itemId;
     final start = _periodStart(_period);
 
@@ -263,7 +289,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
       if (e.lossDate.isBefore(start)) return false;
       if (_lossSearchQuery.trim().isEmpty) return true;
       final q = _lossSearchQuery.trim().toLowerCase();
-      return nameOf(e).toLowerCase().contains(q) || e.itemId.toLowerCase().contains(q);
+      return nameOf(e).toLowerCase().contains(q) ||
+          e.itemId.toLowerCase().contains(q);
     }).toList();
 
     switch (_lossSort) {
@@ -274,10 +301,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
         result.sort((a, b) => a.lossDate.compareTo(b.lossDate));
         break;
       case _LossSortOption.nameAsc:
-        result.sort((a, b) => nameOf(a).toLowerCase().compareTo(nameOf(b).toLowerCase()));
+        result.sort((a, b) =>
+            nameOf(a).toLowerCase().compareTo(nameOf(b).toLowerCase()));
         break;
       case _LossSortOption.nameDesc:
-        result.sort((a, b) => nameOf(b).toLowerCase().compareTo(nameOf(a).toLowerCase()));
+        result.sort((a, b) =>
+            nameOf(b).toLowerCase().compareTo(nameOf(a).toLowerCase()));
         break;
     }
     return result;
@@ -289,6 +318,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     _ReportView.productSales: Icons.shopping_bag,
     _ReportView.losses: Icons.remove_shopping_cart,
     _ReportView.ingredientUsage: Icons.kitchen,
+    _ReportView.transactions: Icons.receipt_long,
   };
 
   /// Pill-style segmented control for Daily/Weekly/Monthly — every graph
@@ -353,16 +383,25 @@ class _ReportsScreenState extends State<ReportsScreen> {
               borderRadius: BorderRadius.circular(14),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
-                  color: selected ? AppColors.teal.withValues(alpha: 0.15) : AppColors.white,
+                  color: selected
+                      ? AppColors.teal.withValues(alpha: 0.15)
+                      : AppColors.white,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: selected ? AppColors.teal : AppColors.cardBorder, width: selected ? 1.5 : 1),
+                  border: Border.all(
+                      color: selected ? AppColors.teal : AppColors.cardBorder,
+                      width: selected ? 1.5 : 1),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(_viewIcons[e.key], size: 19, color: selected ? AppColors.teal : AppColors.brown.withValues(alpha: 0.6)),
+                    Icon(_viewIcons[e.key],
+                        size: 19,
+                        color: selected
+                            ? AppColors.teal
+                            : AppColors.brown.withValues(alpha: 0.6)),
                     const SizedBox(width: 8),
                     Text(
                       e.value,
@@ -406,6 +445,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
         return _buildBestSellersView();
       case _ReportView.productSales:
         return _buildProductSalesView();
+      case _ReportView.transactions:
+        return TransactionsReportView(period: _period);
       case _ReportView.losses:
         return _buildLossesView();
       case _ReportView.ingredientUsage:
@@ -415,7 +456,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Widget _buildSalesSummaryView() {
     final profit = _profitSummary ?? ProfitSummary.zero;
-    final profitColor = profit.netProfit >= 0 ? AppColors.teal : AppColors.stopRed;
+    final profitColor =
+        profit.netProfit >= 0 ? AppColors.teal : AppColors.stopRed;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -423,9 +465,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${_periodLabel(_period)} Sales Summary', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+            Text('${_periodLabel(_period)} Sales Summary',
+                style: GoogleFonts.alfaSlabOne(
+                    fontSize: 18, color: AppColors.brown)),
             const SizedBox(height: 12),
-            if (_loadingAggregate) const Center(child: CircularProgressIndicator()),
+            if (_loadingAggregate)
+              const Center(child: CircularProgressIndicator()),
             if (!_loadingAggregate && _report != null) ...[
               Wrap(
                 spacing: 10,
@@ -464,7 +509,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 const SizedBox(height: 20),
                 Text(
                   'Gross vs. Cost vs. Profit',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.brown.withValues(alpha: 0.8)),
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.brown.withValues(alpha: 0.8)),
                 ),
                 const SizedBox(height: 8),
                 ComparisonBarChart(
@@ -479,7 +527,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 Text(
                   'Cost uses each ingredient\'s current cost-per-unit (set on Ingredients & Stock) applied to what was sold — '
                   'it isn\'t a snapshot of what ingredients cost on the day of each sale. Ingredients with no cost entered count as ₱0.',
-                  style: TextStyle(fontSize: 11, color: AppColors.brown.withValues(alpha: 0.6)),
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.brown.withValues(alpha: 0.6)),
                 ),
               ],
             ],
@@ -496,20 +546,28 @@ class _ReportsScreenState extends State<ReportsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Best Sellers — ${_periodLabel(_period)}', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+            Text('Best Sellers — ${_periodLabel(_period)}',
+                style: GoogleFonts.alfaSlabOne(
+                    fontSize: 18, color: AppColors.brown)),
             const SizedBox(height: 8),
             if (_loadingProducts)
               const Center(child: CircularProgressIndicator())
             else
               Builder(builder: (context) {
-                final ranked = _products.where((p) => _soldForPeriod(p, _period) > 0).toList()
-                  ..sort((a, b) => _soldForPeriod(b, _period).compareTo(_soldForPeriod(a, _period)));
+                final ranked = _products
+                    .where((p) => _soldForPeriod(p, _period) > 0)
+                    .toList()
+                  ..sort((a, b) => _soldForPeriod(b, _period)
+                      .compareTo(_soldForPeriod(a, _period)));
                 final top = ranked.take(5).toList();
                 if (top.isEmpty) {
-                  return Text('No sales recorded for this ${_periodLabel(_period).toLowerCase()} period yet.');
+                  return Text(
+                      'No sales recorded for this ${_periodLabel(_period).toLowerCase()} period yet.');
                 }
                 return RankedBarChart(
-                  entries: top.map((p) => MapEntry(p.name, _soldForPeriod(p, _period))).toList(),
+                  entries: top
+                      .map((p) => MapEntry(p.name, _soldForPeriod(p, _period)))
+                      .toList(),
                 );
               }),
           ],
@@ -520,10 +578,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
   Widget _buildProductSalesView() {
     final filteredProducts = _filterSortProducts();
-    final productPageItems = paginate(filteredProducts, _productPage, _productPageSize);
+    final productPageItems =
+        paginate(filteredProducts, _productPage, _productPageSize);
     final maxOnPage = productPageItems.isEmpty
         ? 0
-        : productPageItems.map((p) => _soldForPeriod(p, _period)).reduce((a, b) => a > b ? a : b);
+        : productPageItems
+            .map((p) => _soldForPeriod(p, _period))
+            .reduce((a, b) => a > b ? a : b);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -531,7 +592,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Product Sales — ${_periodLabel(_period)}', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+            Text('Product Sales — ${_periodLabel(_period)}',
+                style: GoogleFonts.alfaSlabOne(
+                    fontSize: 18, color: AppColors.brown)),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -544,7 +607,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     }),
                     decoration: InputDecoration(
                       hintText: 'Search products...',
-                      prefixIcon: const Icon(Icons.search, color: AppColors.rust),
+                      prefixIcon:
+                          const Icon(Icons.search, color: AppColors.rust),
                       isDense: true,
                       suffixIcon: _productSearchQuery.isEmpty
                           ? null
@@ -576,7 +640,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                 Text(option.label),
                                 if (option == _productSort) ...[
                                   const Spacer(),
-                                  const Icon(Icons.check, size: 18, color: AppColors.rust),
+                                  const Icon(Icons.check,
+                                      size: 18, color: AppColors.rust),
                                 ],
                               ],
                             ),
@@ -602,20 +667,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 onPageChanged: (page) => setState(() => _productPage = page),
               ),
             const SizedBox(height: 8),
-            if (_loadingProducts) const Center(child: CircularProgressIndicator()),
-            if (!_loadingProducts && _products.isEmpty) const Text('No products yet.'),
-            if (!_loadingProducts && _products.isNotEmpty && filteredProducts.isEmpty)
+            if (_loadingProducts)
+              const Center(child: CircularProgressIndicator()),
+            if (!_loadingProducts && _products.isEmpty)
+              const Text('No products yet.'),
+            if (!_loadingProducts &&
+                _products.isNotEmpty &&
+                filteredProducts.isEmpty)
               Text('No products match "$_productSearchQuery".'),
             if (!_loadingProducts)
               LayoutBuilder(
                 builder: (context, constraints) {
                   final columns = gridColumnsForWidth(constraints.maxWidth);
-                  final cardWidth = wrapCardWidth(constraints.maxWidth, columns);
+                  final cardWidth =
+                      wrapCardWidth(constraints.maxWidth, columns);
                   return Wrap(
                     spacing: 12,
                     runSpacing: 12,
                     children: productPageItems.map((p) {
-                      final stat = _productBreakdown[p.id] ?? ProductSalesStat.zero;
+                      final stat =
+                          _productBreakdown[p.id] ?? ProductSalesStat.zero;
                       final sold = _soldForPeriod(p, _period);
                       return SizedBox(
                         width: cardWidth,
@@ -625,13 +696,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           title: p.name,
                           idText: 'ID: ${p.id}',
                           pills: [
-                            StatPill(label: '₱${p.price.toStringAsFixed(2)}', color: AppColors.rust),
+                            StatPill(
+                                label: '₱${p.price.toStringAsFixed(2)}',
+                                color: AppColors.rust),
                           ],
                           extra: Row(
                             children: [
-                              SingleValueBarChart(value: sold, maxValue: maxOnPage),
+                              SingleValueBarChart(
+                                  value: sold, maxValue: maxOnPage),
                               const SizedBox(width: 8),
-                              Text('$sold sold', style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.teal)),
+                              Text('$sold sold',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.teal)),
                             ],
                           ),
                           footerText: stat.lastSoldDate == null
@@ -653,12 +730,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return StreamBuilder<List<Ingredient>>(
       stream: _ingredientService.watchIngredients(),
       builder: (context, ingredientSnap) {
-        if (!ingredientSnap.hasData) return const Center(child: CircularProgressIndicator());
+        if (!ingredientSnap.hasData)
+          return const Center(child: CircularProgressIndicator());
 
         return StreamBuilder<List<FinishedProduct>>(
           stream: _finishedProductService.watchAll(),
           builder: (context, finishedSnap) {
-            if (!finishedSnap.hasData) return const Center(child: CircularProgressIndicator());
+            if (!finishedSnap.hasData)
+              return const Center(child: CircularProgressIndicator());
 
             final nameMap = {
               for (final i in ingredientSnap.data!) i.id: i.name,
@@ -668,10 +747,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
             return StreamBuilder<List<LossEntry>>(
               stream: _lossService.watchLosses(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                if (!snapshot.hasData)
+                  return const Center(child: CircularProgressIndicator());
                 final losses = _filterSortLosses(snapshot.data!, nameMap);
-                final totalQty = losses.fold<num>(0, (sum, e) => sum + e.lossQty);
-                final lossPageItems = paginate(losses, _lossPage, _lossPageSize);
+                final totalQty =
+                    losses.fold<num>(0, (sum, e) => sum + e.lossQty);
+                final lossPageItems =
+                    paginate(losses, _lossPage, _lossPageSize);
 
                 return SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
@@ -679,7 +761,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Losses — ${_periodLabel(_period)}', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+                        Text('Losses — ${_periodLabel(_period)}',
+                            style: GoogleFonts.alfaSlabOne(
+                                fontSize: 18, color: AppColors.brown)),
                         const SizedBox(height: 8),
                         Row(
                           children: [
@@ -692,12 +776,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                 }),
                                 decoration: InputDecoration(
                                   hintText: 'Search by item name or ID...',
-                                  prefixIcon: const Icon(Icons.search, color: AppColors.rust),
+                                  prefixIcon: const Icon(Icons.search,
+                                      color: AppColors.rust),
                                   isDense: true,
                                   suffixIcon: _lossSearchQuery.isEmpty
                                       ? null
                                       : IconButton(
-                                          icon: const Icon(Icons.clear, size: 20),
+                                          icon:
+                                              const Icon(Icons.clear, size: 20),
                                           onPressed: () => setState(() {
                                             _lossSearchController.clear();
                                             _lossSearchQuery = '';
@@ -709,7 +795,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             ),
                             const SizedBox(width: 8),
                             PopupMenuButton<_LossSortOption>(
-                              icon: const Icon(Icons.swap_vert, color: AppColors.rust),
+                              icon: const Icon(Icons.swap_vert,
+                                  color: AppColors.rust),
                               tooltip: 'Sort losses',
                               initialValue: _lossSort,
                               onSelected: (option) => setState(() {
@@ -724,7 +811,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                             Text(option.label),
                                             if (option == _lossSort) ...[
                                               const Spacer(),
-                                              const Icon(Icons.check, size: 18, color: AppColors.rust),
+                                              const Icon(Icons.check,
+                                                  size: 18,
+                                                  color: AppColors.rust),
                                             ],
                                           ],
                                         ),
@@ -742,13 +831,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               _lossPageSize = size;
                               _lossPage = 0;
                             }),
-                            onPageChanged: (page) => setState(() => _lossPage = page),
+                            onPageChanged: (page) =>
+                                setState(() => _lossPage = page),
                           ),
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Text(
                             '${losses.length} loss entr${losses.length == 1 ? "y" : "ies"} • $totalQty total unit${totalQty == 1 ? "" : "s"} lost this ${_periodLabel(_period).toLowerCase()} period',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.brown.withValues(alpha: 0.7)),
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.brown.withValues(alpha: 0.7)),
                           ),
                         ),
                         if (losses.isEmpty)
@@ -763,12 +856,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                 accentColor: color,
                                 title: name,
                                 idText: 'ID: ${loss.itemId}',
-                                badgeText: loss.isIngredient ? 'Ingredient' : 'Finished Product',
+                                badgeText: loss.isIngredient
+                                    ? 'Ingredient'
+                                    : 'Finished Product',
                                 pills: [
-                                  StatPill(label: lossReasonToString(loss.lossReason), color: color),
-                                  StatPill(label: 'Qty: ${loss.lossQty}', color: AppColors.brown, muted: true),
+                                  StatPill(
+                                      label:
+                                          lossReasonToString(loss.lossReason),
+                                      color: color),
+                                  StatPill(
+                                      label: 'Qty: ${loss.lossQty}',
+                                      color: AppColors.brown,
+                                      muted: true),
                                 ],
-                                footerText: _lossDateFormat.format(loss.lossDate),
+                                footerText:
+                                    _lossDateFormat.format(loss.lossDate),
                               );
                             }).toList(),
                           ),
@@ -804,7 +906,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
           final name = (ingredientNames[e.key] ?? e.key).toLowerCase();
           return name.contains(q) || e.key.toLowerCase().contains(q);
         }).toList();
-        final usagePageItems = paginate(usageEntries, _usagePage, _usagePageSize);
+        final usagePageItems =
+            paginate(usageEntries, _usagePage, _usagePageSize);
 
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
@@ -812,7 +915,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Ingredient Usage — ${_periodLabel(_period)}', style: GoogleFonts.alfaSlabOne(fontSize: 18, color: AppColors.brown)),
+                Text('Ingredient Usage — ${_periodLabel(_period)}',
+                    style: GoogleFonts.alfaSlabOne(
+                        fontSize: 18, color: AppColors.brown)),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _usageSearchController,
@@ -837,10 +942,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                if (_loadingAggregate) const Center(child: CircularProgressIndicator()),
+                if (_loadingAggregate)
+                  const Center(child: CircularProgressIndicator()),
                 if (!_loadingAggregate && allUsageEntries.isEmpty)
                   const Text('No ingredient usage recorded for this period.'),
-                if (!_loadingAggregate && allUsageEntries.isNotEmpty && usageEntries.isEmpty)
+                if (!_loadingAggregate &&
+                    allUsageEntries.isNotEmpty &&
+                    usageEntries.isEmpty)
                   Text('No ingredients match "$_usageSearchQuery".'),
                 if (!_loadingAggregate && usageEntries.isNotEmpty) ...[
                   PaginationBar(
@@ -855,15 +963,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                   const SizedBox(height: 4),
                   Column(
-                    children: usagePageItems.map((e) => InfoListCard(
-                          leadingIcon: Icons.kitchen,
-                          accentColor: AppColors.teal,
-                          title: ingredientNames[e.key] ?? e.key,
-                          idText: 'ID: ${e.key}',
-                          pills: [
-                            StatPill(label: 'Used: ${e.value}', color: AppColors.rust),
-                          ],
-                        )).toList(),
+                    children: usagePageItems
+                        .map((e) => InfoListCard(
+                              leadingIcon: Icons.kitchen,
+                              accentColor: AppColors.teal,
+                              title: ingredientNames[e.key] ?? e.key,
+                              idText: 'ID: ${e.key}',
+                              pills: [
+                                StatPill(
+                                    label: 'Used: ${e.value}',
+                                    color: AppColors.rust),
+                              ],
+                            ))
+                        .toList(),
                   ),
                 ],
               ],
@@ -882,7 +994,8 @@ class _StatHighlight extends StatelessWidget {
   final String value;
   final Color color;
 
-  const _StatHighlight({required this.label, required this.value, required this.color});
+  const _StatHighlight(
+      {required this.label, required this.value, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -898,9 +1011,15 @@ class _StatHighlight extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.brown.withValues(alpha: 0.7))),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.brown.withValues(alpha: 0.7))),
           const SizedBox(height: 2),
-          Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: color)),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.w800, color: color)),
         ],
       ),
     );
