@@ -2,13 +2,12 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
 /// The consistent list-card layout used across Ingredients & Stock,
-/// Products, Stock Movement Log, Losses, Reports, and Low Stock Alerts —
-/// so scanning down any of these screens feels like the same visual
-/// language: a colored icon badge on the left (or a custom leading
-/// widget, e.g. a rank number), a title row with an optional small pill
-/// on the right, an ID line underneath when relevant, a row of stat
-/// pills, an optional extra widget (e.g. action buttons), and a small
-/// muted footer line for a date or extra detail.
+/// Products, Stock Movement Log, Reports, and Low Stock Alerts.
+///
+/// Layout: a tinted rounded-square icon badge on the left, then a title row
+/// (with an optional small badge and trailing action), an ID line, stat
+/// pills, an optional extra widget (e.g. action buttons) and a muted footer.
+/// Everything below the title is aligned with the title text, not the badge.
 class InfoListCard extends StatelessWidget {
   final IconData? leadingIcon;
   final Widget? leadingWidget; // overrides leadingIcon when set (e.g. a rank badge)
@@ -41,14 +40,14 @@ class InfoListCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final indent = _hasLeading ? 28.0 : 0.0;
+    final indent = _hasLeading ? 48.0 : 0.0;
 
     return Card(
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -56,35 +55,46 @@ class InfoListCard extends StatelessWidget {
                 children: [
                   if (leadingWidget != null) ...[
                     leadingWidget!,
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 12),
                   ] else if (leadingIcon != null) ...[
-                    CircleAvatar(
-                      radius: 18,
-                      backgroundColor: accentColor.withValues(alpha: 0.15),
-                      child: Icon(leadingIcon, color: accentColor, size: 18),
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(leadingIcon, color: accentColor, size: 19),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 12),
                   ],
                   Expanded(
                     child: Text(
                       title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        color: AppColors.brown,
+                      ),
                     ),
                   ),
                   if (badgeText != null) ...[
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: AppColors.cream,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: AppColors.cardBorder),
+                        borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
                         badgeText!,
-                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.brown),
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.brown.withValues(alpha: 0.75),
+                        ),
                       ),
                     ),
                   ],
@@ -95,11 +105,14 @@ class InfoListCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Padding(
                   padding: EdgeInsets.only(left: indent),
-                  child: Text(idText!, style: TextStyle(fontSize: 11, color: AppColors.brown.withValues(alpha: 0.55))),
+                  child: Text(
+                    idText!,
+                    style: TextStyle(fontSize: 11, color: AppColors.brown.withValues(alpha: 0.5)),
+                  ),
                 ),
               ],
               if (pills.isNotEmpty) ...[
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Padding(
                   padding: EdgeInsets.only(left: indent),
                   child: Wrap(spacing: 8, runSpacing: 6, children: pills),
@@ -110,10 +123,13 @@ class InfoListCard extends StatelessWidget {
                 Padding(padding: EdgeInsets.only(left: indent), child: extra!),
               ],
               if (footerText != null) ...[
-                const SizedBox(height: 6),
+                const SizedBox(height: 8),
                 Padding(
                   padding: EdgeInsets.only(left: indent),
-                  child: Text(footerText!, style: TextStyle(fontSize: 11, color: AppColors.brown.withValues(alpha: 0.6))),
+                  child: Text(
+                    footerText!,
+                    style: TextStyle(fontSize: 11, color: AppColors.brown.withValues(alpha: 0.55)),
+                  ),
                 ),
               ],
             ],
@@ -124,9 +140,8 @@ class InfoListCard extends StatelessWidget {
   }
 }
 
-/// Small rounded status/stat badge — "Fresh: 20 kg", "Today: 5",
-/// "Used: 12", etc. Used inside InfoListCard's `pills` across every
-/// screen that shows this kind of quick stat.
+/// Small rounded status/stat badge — "Fresh: 20 kg", "Today: 5", etc.
+/// A soft tint with a faint outline; no heavy borders.
 class StatPill extends StatelessWidget {
   final String label;
   final Color color;
@@ -137,18 +152,18 @@ class StatPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: muted ? 0.08 : 0.15),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: muted ? 0.3 : 1)),
+        color: color.withValues(alpha: muted ? 0.07 : 0.13),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: muted ? 0.2 : 0.35)),
       ),
       child: Text(
         label,
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w700,
-          color: muted ? AppColors.brown.withValues(alpha: 0.5) : AppColors.brown,
+          color: muted ? AppColors.brown.withValues(alpha: 0.55) : AppColors.brown,
         ),
       ),
     );

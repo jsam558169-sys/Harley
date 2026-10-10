@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
-/// A dashboard nav item styled like a ticket stub / punch card — flat
-/// cream card with a thick brown border and a circular icon badge,
-/// deliberately not the generic soft-grey-shadow card.
+/// A dashboard navigation tile: tinted icon badge top-left, a small arrow
+/// top-right, and the label (plus optional one-line description) at the
+/// bottom. Give it a fixed height from the parent (e.g. SizedBox).
 class TicketNavCard extends StatelessWidget {
   final IconData icon;
   final String label;
+  final String? subtitle;
   final VoidCallback onTap;
   final Color accent;
 
@@ -15,41 +16,70 @@ class TicketNavCard extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.subtitle,
     this.accent = AppColors.rust,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.cardBorder, width: 1.5),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircleAvatar(
-              radius: 24,
-              backgroundColor: accent.withValues(alpha: 0.15),
-              child: Icon(icon, color: accent, size: 24),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-                color: AppColors.brown,
-                fontSize: 13,
-                height: 1.2,
+    return Material(
+      color: AppColors.white,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(color: AppColors.cardBorder),
+      ),
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(icon, color: accent, size: 22),
+                  ),
+                  const Spacer(),
+                  Icon(Icons.arrow_forward, size: 16, color: AppColors.brown.withValues(alpha: 0.35)),
+                ],
               ),
-            ),
-          ],
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.brown,
+                      fontSize: 14,
+                      height: 1.2,
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: AppColors.brown.withValues(alpha: 0.6)),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

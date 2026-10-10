@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../services/auth_service.dart';
+import '../theme/app_colors.dart';
 import 'admin_dashboard.dart';
 import 'employee_dashboard.dart';
 
@@ -33,8 +35,8 @@ String _friendlyAuthError(Object error) {
   return 'Something went wrong. Please try again.';
 }
 
-/// Login screen styled like the front of a motor café: a marquee-sign
-/// banner up top, order-ticket-style form card below.
+/// Login screen: brand mark on top, a single centered form card below.
+/// Same sign-in logic and routing as before — only the layout changed.
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -48,8 +50,17 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   String? _error;
   bool _loading = false;
+  bool _obscure = true;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
 
   Future<void> _login() async {
+    if (_loading) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -77,30 +88,143 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Harley POS - Login')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextField(
-              controller: _emailController,
-              decoration: const InputDecoration(labelText: 'Email'),
-              keyboardType: TextInputType.emailAddress,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 68,
+                    height: 68,
+                    decoration: BoxDecoration(
+                      color: AppColors.brown,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Icon(Icons.two_wheeler, color: AppColors.gold, size: 34),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "Harley's",
+                    style: GoogleFonts.alfaSlabOne(fontSize: 32, color: AppColors.brown),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Inventory & Sales System',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.brown.withValues(alpha: 0.65),
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  Container(
+                    padding: const EdgeInsets.all(24),
+                    decoration: BoxDecoration(
+                      color: AppColors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: AppColors.cardBorder),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.brown.withValues(alpha: 0.06),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text(
+                          'Sign in',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.brown,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Use the account your Owner/Admin created for you.',
+                          style: TextStyle(fontSize: 13, color: AppColors.brown.withValues(alpha: 0.65)),
+                        ),
+                        const SizedBox(height: 20),
+                        TextField(
+                          controller: _emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          textInputAction: TextInputAction.next,
+                          autofillHints: const [AutofillHints.email],
+                          decoration: const InputDecoration(
+                            labelText: 'Email',
+                            prefixIcon: Icon(Icons.mail_outline),
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        TextField(
+                          controller: _passwordController,
+                          obscureText: _obscure,
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) => _login(),
+                          autofillHints: const [AutofillHints.password],
+                          decoration: InputDecoration(
+                            labelText: 'Password',
+                            prefixIcon: const Icon(Icons.lock_outline),
+                            suffixIcon: IconButton(
+                              icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                              tooltip: _obscure ? 'Show password' : 'Hide password',
+                              onPressed: () => setState(() => _obscure = !_obscure),
+                            ),
+                          ),
+                        ),
+                        if (_error != null) ...[
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: AppColors.stopRed.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppColors.stopRed.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.error_outline, size: 18, color: AppColors.stopRed),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    _error!,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.stopRed,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 20),
+                        ElevatedButton(
+                          onPressed: _loading ? null : _login,
+                          child: _loading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.white),
+                                )
+                              : const Text('Log in'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-            TextField(
-              controller: _passwordController,
-              decoration: const InputDecoration(labelText: 'Password'),
-              obscureText: true,
-            ),
-            const SizedBox(height: 16),
-            if (_error != null)
-              Text(_error!, style: const TextStyle(color: Colors.red)),
-            ElevatedButton(
-              onPressed: _loading ? null : _login,
-              child: Text(_loading ? 'Logging in...' : 'Login'),
-            ),
-          ],
+          ),
         ),
       ),
     );

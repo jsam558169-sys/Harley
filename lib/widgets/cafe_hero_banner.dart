@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_colors.dart';
 
-/// The "marquee sign" banner used at the top of the login screen and both
-/// dashboards — dark engine-brown background, cream slab-serif title,
-/// evoking a roadside motor café sign.
+/// The "marquee sign" banner at the top of the dashboards — engine-brown
+/// rounded card, cream/gold slab-serif title. Now a self-contained card
+/// (rounded on all corners) so it can sit inside page padding.
 class CafeHeroBanner extends StatelessWidget {
   final String title;
   final String subtitle;
@@ -21,13 +21,10 @@ class CafeHeroBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-      decoration: const BoxDecoration(
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+      decoration: BoxDecoration(
         color: AppColors.brown,
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(28),
-          bottomRight: Radius.circular(28),
-        ),
+        borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         children: [
@@ -36,26 +33,31 @@ class CafeHeroBanner extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  title,
-                  style: GoogleFonts.alfaSlabOne(
-                    fontSize: 26,
-                    color: AppColors.gold,
-                    height: 1.15,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
                   subtitle,
                   style: GoogleFonts.nunito(
-                    fontSize: 14,
-                    color: AppColors.white.withValues(alpha: 0.85),
+                    fontSize: 13,
+                    color: AppColors.white.withValues(alpha: 0.75),
                     fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.alfaSlabOne(
+                    fontSize: 24,
+                    color: AppColors.gold,
+                    height: 1.15,
                   ),
                 ),
               ],
             ),
           ),
-          if (trailing != null) trailing!,
+          if (trailing != null) ...[
+            const SizedBox(width: 12),
+            trailing!,
+          ],
         ],
       ),
     );
